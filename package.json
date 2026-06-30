@@ -10,7 +10,8 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "nodemailer": "^9.0.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

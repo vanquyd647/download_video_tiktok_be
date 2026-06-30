@@ -13,11 +13,16 @@ import {
   resolveDirectDownload,
   streamDownload,
 } from './ytdlp.js';
+import {
+  sendFeedbackMail,
+  validateFeedback,
+} from './feedback.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
 const port = Number(process.env.PORT || 8787);
 const app = express();
+const feedbackRateLimit = new Map();
 
 app.use(express.json({ limit: '1mb' }));
 app.use((req, res, next) => {
@@ -50,6 +55,22 @@ app.get('/api/browser-profiles', (_req, res) => {
   res.json({
     profiles: listBrowserProfiles(),
   });
+});
+
+app.post('/api/feedback', async (req, res) => {
+  try {
+    enforceFeedbackRateLimit(getClientIp(req));
+    const feedback = validateFeedback(req.body);
+    await sendFeedbackMail(feedback, {
+      ip: getClientIp(req),
+      userAgent: req.get('user-agent'),
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(error.status || 500).json({
+      message: error.message || 'Could not send feedback.',
+    });
+  }
 });
 
 app.post('/api/metadata', async (req, res) => {
@@ -338,4 +359,30 @@ function readProfileDirs(basePath) {
   } catch {
     return [];
   }
+}
+
+function getClientIp(req) {
+  return String(req.get('x-forwarded-for') || req.ip || 'unknown').split(',')[0].trim();
+}
+
+function enforceFeedbackRateLimit(ip) {
+  const now = Date.now();
+  const key = ip || 'unknown';
+  const windowMs = 15 * 60 * 1000;
+  const maxRequests = 5;
+  const entry = feedbackRateLimit.get(key) || { count: 0, resetAt: now + windowMs };
+
+  if (entry.resetAt < now) {
+    feedbackRateLimit.set(key, { count: 1, resetAt: now + windowMs });
+    return;
+  }
+
+  if (entry.count >= maxRequests) {
+    const error = new Error('Too many feedback messages. Please try again later.');
+    error.status = 429;
+    throw error;
+  }
+
+  entry.count += 1;
+  feedbackRateLimit.set(key, entry);
 }
