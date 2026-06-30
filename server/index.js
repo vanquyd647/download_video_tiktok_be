@@ -242,7 +242,7 @@ app.listen(port, '0.0.0.0', () => {
 
 function assertSupportedUrl(value) {
   if (!value || typeof value !== 'string') {
-    const error = new Error('Paste a TikTok or Facebook video link first.');
+    const error = new Error('Paste a TikTok, Facebook, or YouTube video link first.');
     error.status = 400;
     throw error;
   }
@@ -257,7 +257,7 @@ function assertSupportedUrl(value) {
   }
 
   if (!['http:', 'https:'].includes(parsed.protocol) || !detectPlatform(parsed.href)) {
-    const error = new Error('Only TikTok and Facebook video links are supported.');
+    const error = new Error('Only TikTok, Facebook, and YouTube video links are supported.');
     error.status = 400;
     throw error;
   }

@@ -7,6 +7,8 @@ const supportedHosts = [
   /(^|\.)tiktok\.com$/i,
   /(^|\.)facebook\.com$/i,
   /(^|\.)fb\.watch$/i,
+  /(^|\.)youtube\.com$/i,
+  /(^|\.)youtu\.be$/i,
 ];
 let cachedYtDlpCommand = null;
 let cachedYtDlpStatus = null;
@@ -23,6 +25,7 @@ export function detectPlatform(url) {
     const host = new URL(url).hostname.replace(/^www\./i, '');
     if (/tiktok\.com$/i.test(host)) return 'TikTok';
     if (/facebook\.com$/i.test(host) || /fb\.watch$/i.test(host)) return 'Facebook';
+    if (/youtube\.com$/i.test(host) || /youtu\.be$/i.test(host)) return 'YouTube';
   } catch {
     return null;
   }
@@ -696,13 +699,17 @@ export function cleanYtDlpError(stderr) {
     return 'TikTok did not expose video data for this request. Use the exact TikTok share URL, confirm the video is public, and try the browser cookies option for the browser where you are logged in.';
   }
 
+  if (/YouTube.*Sign in to confirm|confirm you.?re not a bot|HTTP Error 403/i.test(message)) {
+    return 'YouTube blocked this request. Use a public video you own or have permission to download, or try browser cookies from a browser where you are signed in.';
+  }
+
   return message;
 }
 
 function assertKnownHost(url) {
   const host = new URL(url).hostname;
   if (!supportedHosts.some((pattern) => pattern.test(host))) {
-    const error = new Error('Only TikTok and Facebook links are supported.');
+    const error = new Error('Only TikTok, Facebook, and YouTube links are supported.');
     error.status = 400;
     throw error;
   }

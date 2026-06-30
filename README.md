@@ -1,6 +1,6 @@
 # download_video_tiktok_be
 
-Backend Express API for LinkVault TikTok downloader. Downloads are streamed to the browser; completed videos are not saved in this backend project.
+Backend Express API for LinkVault social video downloader. Supports authorized TikTok, Facebook, and YouTube downloads streamed to the browser; completed videos are not saved in this backend project.
 
 ## Run
 
