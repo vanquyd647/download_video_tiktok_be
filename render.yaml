@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: download-video-tiktok-be
+    runtime: node
+    repo: https://github.com/vanquyd647/download_video_tiktok_be
+    plan: free
+    branch: main
+    buildCommand: npm ci && npm run setup:yt-dlp
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: CLIENT_ORIGIN
+        value: "*"
+      - key: YT_DLP_IMPERSONATE
+        value: chrome

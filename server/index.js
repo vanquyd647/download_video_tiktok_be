@@ -131,7 +131,7 @@ app.use((_req, res) => {
   res.status(404).json({ message: 'Route not found.' });
 });
 
-app.listen(port, () => {
+app.listen(port, '0.0.0.0', () => {
   console.log(`LinkVault API running on http://localhost:${port}`);
 });
 
