@@ -114,7 +114,7 @@ app.post('/api/download-url', async (req, res) => {
     fileName = buildDownloadFileName(url, req.body?.title);
     const direct = await resolveDirectDownload(url, root, { quality, ...cookieOptions });
 
-    if (cookieOptions.cookiesText) {
+    if (hasPrivateDownloadOptions(cookieOptions)) {
       const token = createDownloadSession({
         type: 'direct',
         direct,
@@ -142,7 +142,7 @@ app.post('/api/download-url', async (req, res) => {
       fileName,
     });
   } catch (error) {
-    if (error.handled && cookieOptions?.cookiesText && url) {
+    if (error.handled && hasPrivateDownloadOptions(cookieOptions) && url) {
       const token = createDownloadSession({
         type: 'stream',
         url,
@@ -350,16 +350,23 @@ function normalizeCookiesBrowser(value, profileValue) {
 
 function normalizeCookieOptions(source) {
   const cookiesText = normalizeCookiesText(source?.cookiesText);
+  const poToken = normalizePoToken(source?.poToken);
   if (cookiesText) {
     return {
       cookiesBrowser: null,
       cookiesText,
+      poToken,
     };
   }
 
   return {
     cookiesBrowser: normalizeCookiesBrowser(source?.cookiesBrowser, source?.cookiesProfile),
+    poToken,
   };
+}
+
+function hasPrivateDownloadOptions(cookieOptions) {
+  return Boolean(cookieOptions?.cookiesText || cookieOptions?.poToken);
 }
 
 function normalizeCookiesText(value) {
@@ -386,6 +393,20 @@ function normalizeCookiesText(value) {
   }
 
   return `${text}\n`;
+}
+
+function normalizePoToken(value) {
+  if (!value) return null;
+
+  const token = String(value).trim();
+  if (!token) return null;
+  if (token.length > 4096 || !/^[A-Za-z0-9._~+/=-]+$/.test(token)) {
+    const error = new Error('YouTube PO token format is not valid.');
+    error.status = 400;
+    throw error;
+  }
+
+  return token;
 }
 
 function createDownloadSession(payload) {

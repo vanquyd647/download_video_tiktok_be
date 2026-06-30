@@ -141,6 +141,7 @@ export async function resolveDirectDownload(url, root, options = {}) {
   const cacheKey = buildCacheKey('direct', url, {
     cookiesBrowser: options.cookiesBrowser,
     cookiesText: options.cookiesText,
+    poToken: options.poToken,
     quality,
   });
   const cached = readCache(directDownloadCache, cacheKey, directDownloadCacheTtlMs);
@@ -199,8 +200,8 @@ export async function resolveDirectDownload(url, root, options = {}) {
   return payload;
 }
 
-export async function fetchDirectDownload({ url, quality, cookiesBrowser, cookiesText, root, signal }) {
-  const direct = await resolveDirectDownload(url, root, { quality, cookiesBrowser, cookiesText });
+export async function fetchDirectDownload({ url, quality, cookiesBrowser, cookiesText, poToken, root, signal }) {
+  const direct = await resolveDirectDownload(url, root, { quality, cookiesBrowser, cookiesText, poToken });
   return fetchResolvedDirectDownload({ direct, signal });
 }
 
@@ -222,7 +223,7 @@ export async function fetchResolvedDirectDownload({ direct, signal }) {
   return response;
 }
 
-export function streamDownload({ url, quality, cookiesBrowser, cookiesText, root }) {
+export function streamDownload({ url, quality, cookiesBrowser, cookiesText, poToken, root }) {
   assertKnownHost(url);
 
   const command = resolveYtDlp(root);
@@ -232,7 +233,7 @@ export function streamDownload({ url, quality, cookiesBrowser, cookiesText, root
     throw error;
   }
 
-  const common = commonArgs(url, { cookiesBrowser, cookiesText });
+  const common = commonArgs(url, { cookiesBrowser, cookiesText, poToken });
   const args = [
     ...common.args,
     '--quiet',
@@ -256,7 +257,7 @@ export function streamDownload({ url, quality, cookiesBrowser, cookiesText, root
   return child;
 }
 
-export function startDownload({ url, quality, cookiesBrowser, cookiesText, root, downloadsDir, onUpdate }) {
+export function startDownload({ url, quality, cookiesBrowser, cookiesText, poToken, root, downloadsDir, onUpdate }) {
   assertKnownHost(url);
 
   const id = randomUUID();
@@ -280,7 +281,7 @@ export function startDownload({ url, quality, cookiesBrowser, cookiesText, root,
     onUpdate({ ...job });
   };
 
-  const common = commonArgs(url, { cookiesBrowser, cookiesText });
+  const common = commonArgs(url, { cookiesBrowser, cookiesText, poToken });
   const args = [
     ...common.args,
     '--newline',
@@ -398,6 +399,11 @@ function commonArgs(url, options = {}) {
 
   if (detectPlatform(url) === 'TikTok' && process.env.YT_DLP_IMPERSONATE !== '0') {
     args.push('--impersonate', process.env.YT_DLP_IMPERSONATE || 'chrome');
+  }
+
+  const youtubeExtractorArgs = buildYoutubeExtractorArgs(url, options);
+  if (youtubeExtractorArgs) {
+    args.push('--extractor-args', youtubeExtractorArgs);
   }
 
   if (options.cookiesText) {
@@ -673,6 +679,7 @@ function buildCacheKey(kind, url, options = {}) {
     quality: options.quality || '',
     cookiesBrowser: options.cookiesBrowser || '',
     cookiesTextHash: options.cookiesText ? hashText(options.cookiesText) : '',
+    poTokenHash: options.poToken ? hashText(options.poToken) : '',
   });
 }
 
@@ -735,6 +742,53 @@ function once(fn) {
   };
 }
 
+function buildYoutubeExtractorArgs(url, options = {}) {
+  if (detectPlatform(url) !== 'YouTube') return null;
+
+  if (process.env.YT_DLP_YOUTUBE_EXTRACTOR_ARGS) {
+    return process.env.YT_DLP_YOUTUBE_EXTRACTOR_ARGS;
+  }
+
+  const clients = sanitizeYoutubeClients(
+    process.env.YT_DLP_YOUTUBE_CLIENTS || (options.poToken ? 'web,mweb,default' : 'default,web_safari,mweb'),
+  );
+  const parts = [`player_client=${clients}`];
+
+  if (options.poToken) {
+    parts.push(`po_token=${buildPoTokenArg(clients, options.poToken)}`);
+  }
+
+  return `youtube:${parts.join(';')}`;
+}
+
+function sanitizeYoutubeClients(value) {
+  const allowed = new Set([
+    'default',
+    'mweb',
+    'web',
+    'web_safari',
+    'web_embedded',
+    'web_music',
+    'tv',
+    'tv_simply',
+  ]);
+  const clients = String(value || '')
+    .split(',')
+    .map((item) => item.trim().toLowerCase())
+    .filter((item) => allowed.has(item));
+  return (clients.length ? clients : ['default', 'web_safari', 'mweb']).join(',');
+}
+
+function buildPoTokenArg(clients, token) {
+  const cleanedToken = String(token || '').trim();
+  if (!cleanedToken) return '';
+  return clients
+    .split(',')
+    .filter((client) => client && client !== 'default')
+    .map((client) => `${client}+${cleanedToken}`)
+    .join(',');
+}
+
 export function cleanYtDlpError(stderr) {
   const message = stderr
     .split(/\r?\n/)
@@ -757,8 +811,8 @@ export function cleanYtDlpError(stderr) {
     return 'TikTok did not expose video data for this request. Use the exact TikTok share URL, confirm the video is public, and try the browser cookies option for the browser where you are logged in.';
   }
 
-  if (/YouTube.*Sign in to confirm|confirm you.?re not a bot|HTTP Error 403/i.test(message)) {
-    return 'YouTube blocked this request. Use a public video you own or have permission to download, or try browser cookies from a browser where you are signed in.';
+  if (/YouTube.*Sign in to confirm|confirm you.?re not a bot|HTTP Error 403|PO Token|potoken/i.test(message)) {
+    return 'YouTube blocked this request. Paste fresh YouTube cookies.txt first. If it still fails, add a matching YouTube PO token from the same browser session.';
   }
 
   return message;
