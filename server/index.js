@@ -2,10 +2,12 @@ import express from 'express';
 import { existsSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import {
   cleanYtDlpError,
   detectPlatform,
+  fetchDirectDownload,
   getYtDlpStatus,
   readMetadata,
   resolveDirectDownload,
@@ -80,11 +82,18 @@ app.post('/api/download-url', async (req, res) => {
     const url = assertSupportedUrl(req.body?.url);
     const quality = normalizeQuality(req.body?.quality);
     const cookiesBrowser = normalizeCookiesBrowser(req.body?.cookiesBrowser, req.body?.cookiesProfile);
-    const direct = await resolveDirectDownload(url, root, { quality, cookiesBrowser });
+    await resolveDirectDownload(url, root, { quality, cookiesBrowser });
 
     res.json({
       ok: true,
-      ...direct,
+      mode: 'direct-proxy',
+      url: buildApiUrl(req, '/api/download-direct', {
+        url,
+        quality,
+        cookiesBrowser: req.body?.cookiesBrowser || 'none',
+        cookiesProfile: req.body?.cookiesProfile || '',
+        title: req.body?.title || 'video',
+      }),
       fileName: buildDownloadFileName(url, req.body?.title),
     });
   } catch (error) {
@@ -104,6 +113,48 @@ app.post('/api/download-url', async (req, res) => {
 });
 
 app.get('/api/download-local', (req, res) => {
+  streamYtDlpDownload(req, res);
+});
+
+app.get('/api/download-direct', async (req, res) => {
+  try {
+    const url = assertSupportedUrl(req.query?.url);
+    const quality = normalizeQuality(req.query?.quality);
+    const cookiesBrowser = normalizeCookiesBrowser(req.query?.cookiesBrowser, req.query?.cookiesProfile);
+    const fileName = buildDownloadFileName(url, req.query?.title);
+    const upstream = await fetchDirectDownload({
+      url,
+      quality,
+      cookiesBrowser,
+      root,
+      signal: req.signal,
+    });
+
+    res.status(200);
+    res.setHeader('Content-Type', upstream.headers.get('content-type') || 'video/mp4');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    const contentLength = upstream.headers.get('content-length');
+    if (contentLength) {
+      res.setHeader('Content-Length', contentLength);
+    }
+    Readable.fromWeb(upstream.body).pipe(res);
+  } catch (error) {
+    if (!res.headersSent && error.handled) {
+      streamYtDlpDownload(req, res);
+      return;
+    }
+
+    if (!res.headersSent) {
+      res.status(error.status || 500).json({
+        message: error.message || 'Could not start fast download.',
+      });
+    } else {
+      res.destroy(error);
+    }
+  }
+});
+
+function streamYtDlpDownload(req, res) {
   try {
     const url = assertSupportedUrl(req.query?.url);
     const quality = normalizeQuality(req.query?.quality);
@@ -158,7 +209,7 @@ app.get('/api/download-local', (req, res) => {
       message: error.message || 'Could not start download.',
     });
   }
-});
+}
 
 app.use((_req, res) => {
   res.status(404).json({ message: 'Route not found.' });
@@ -233,6 +284,16 @@ function buildDownloadFileName(url, title) {
   const videoId = new URL(url).pathname.split('/').filter(Boolean).pop() || 'download';
   const safeTitle = sanitizeFilePart(title || videoId).slice(0, 80);
   return `${sanitizeFilePart(platform)}-${videoId}-${safeTitle}.mp4`;
+}
+
+function buildApiUrl(req, pathname, params) {
+  const protocol = req.get('x-forwarded-proto') || req.protocol || 'https';
+  const base = `${protocol}://${req.get('host')}`;
+  const apiUrl = new URL(pathname, base);
+  for (const [key, value] of Object.entries(params)) {
+    apiUrl.searchParams.set(key, value);
+  }
+  return apiUrl.href;
 }
 
 function sanitizeFilePart(value) {

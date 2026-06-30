@@ -144,22 +144,28 @@ export async function resolveDirectDownload(url, root, options = {}) {
       '--no-progress',
       '--format',
       directQualityToFormat(quality),
-      '--get-url',
+      '--skip-download',
+      '--dump-single-json',
       url,
     ],
     {
       root,
       timeoutMs: 45_000,
-      maxOutputBytes: 2 * 1024 * 1024,
+      maxOutputBytes: 20 * 1024 * 1024,
     },
   );
 
-  const urls = result.stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => /^https?:\/\//i.test(line));
+  let data;
+  try {
+    data = JSON.parse(result.stdout);
+  } catch {
+    const error = new Error('yt-dlp returned download data in an unexpected format.');
+    error.status = 502;
+    throw error;
+  }
 
-  if (urls.length !== 1) {
+  const direct = extractDirectDownload(data);
+  if (!direct) {
     const error = new Error('Could not resolve a single direct media URL. Falling back to server streaming.');
     error.status = 409;
     error.handled = true;
@@ -167,12 +173,32 @@ export async function resolveDirectDownload(url, root, options = {}) {
   }
 
   const payload = {
-    url: urls[0],
-    mode: 'direct',
+    sourceUrl: direct.url,
+    headers: direct.headers,
+    mode: 'direct-proxy',
     cachedAt: new Date().toISOString(),
   };
   writeCache(directDownloadCache, cacheKey, payload);
   return payload;
+}
+
+export async function fetchDirectDownload({ url, quality, cookiesBrowser, root, signal }) {
+  const direct = await resolveDirectDownload(url, root, { quality, cookiesBrowser });
+  const headers = filterDownloadHeaders(direct.headers);
+  const response = await fetch(direct.sourceUrl, {
+    headers,
+    redirect: 'follow',
+    signal,
+  });
+
+  if (!response.ok || !response.body) {
+    const error = new Error(`Direct media request failed with status ${response.status}.`);
+    error.status = response.status || 502;
+    error.handled = true;
+    throw error;
+  }
+
+  return response;
 }
 
 export function streamDownload({ url, quality, cookiesBrowser, root }) {
@@ -406,6 +432,39 @@ function summarizeFormats(formats) {
       return true;
     })
     .slice(0, 12);
+}
+
+function extractDirectDownload(data) {
+  const candidates = [
+    ...(Array.isArray(data.requested_downloads) ? data.requested_downloads : []),
+    data,
+  ];
+  const direct = candidates.find((item) => item?.url && /^https?:\/\//i.test(item.url));
+  if (!direct) return null;
+
+  return {
+    url: direct.url,
+    headers: {
+      ...(data.http_headers || {}),
+      ...(direct.http_headers || {}),
+    },
+  };
+}
+
+function filterDownloadHeaders(headers = {}) {
+  const allowed = new Set([
+    'accept',
+    'accept-language',
+    'cookie',
+    'origin',
+    'referer',
+    'user-agent',
+  ]);
+
+  return Object.fromEntries(
+    Object.entries(headers)
+      .filter(([key, value]) => allowed.has(key.toLowerCase()) && typeof value === 'string' && value),
+  );
 }
 
 function resolveYtDlp(root) {
