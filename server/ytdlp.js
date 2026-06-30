@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -14,6 +14,7 @@ let cachedYtDlpStatusAt = 0;
 const metadataCache = new Map();
 const directDownloadCache = new Map();
 const statusCacheTtlMs = 5 * 60 * 1000;
+const failedStatusCacheTtlMs = 10 * 1000;
 const metadataCacheTtlMs = 10 * 60 * 1000;
 const directDownloadCacheTtlMs = 10 * 60 * 1000;
 
@@ -30,7 +31,8 @@ export function detectPlatform(url) {
 }
 
 export async function getYtDlpStatus(root) {
-  if (cachedYtDlpStatus && Date.now() - cachedYtDlpStatusAt < statusCacheTtlMs) {
+  const cacheTtl = cachedYtDlpStatus?.available ? statusCacheTtlMs : failedStatusCacheTtlMs;
+  if (cachedYtDlpStatus && Date.now() - cachedYtDlpStatusAt < cacheTtl) {
     return cachedYtDlpStatus;
   }
 
@@ -44,10 +46,21 @@ export async function getYtDlpStatus(root) {
     return cachedYtDlpStatus;
   }
 
+  const vendorVersion = readVendoredYtDlpVersion(root);
+  if (vendorVersion) {
+    cachedYtDlpStatus = {
+      available: true,
+      version: vendorVersion,
+      runtime: command.label,
+    };
+    cachedYtDlpStatusAt = Date.now();
+    return cachedYtDlpStatus;
+  }
+
   const result = spawnSync(command.cmd, [...command.prefixArgs, '--version'], {
     env: command.env,
     encoding: 'utf8',
-    timeout: 5000,
+    timeout: 15000,
   });
 
   if (result.status !== 0) {
@@ -468,6 +481,25 @@ function resolveYtDlp(root) {
   if (canStartYtDlp(pathCommand)) {
     cachedYtDlpCommand = pathCommand;
     return cachedYtDlpCommand;
+  }
+
+  return null;
+}
+
+function readVendoredYtDlpVersion(root) {
+  const candidates = [
+    resolve(root, '.vendor/python/yt_dlp/version.py'),
+    resolve(root, '.vendor/yt-dlp-py312/yt_dlp/version.py'),
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      if (!existsSync(candidate)) continue;
+      const match = readFileSync(candidate, 'utf8').match(/__version__\s*=\s*['"]([^'"]+)['"]/);
+      if (match) return match[1];
+    } catch {
+      // Fall back to asking the executable.
+    }
   }
 
   return null;
