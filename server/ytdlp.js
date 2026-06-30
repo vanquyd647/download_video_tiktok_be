@@ -1,6 +1,7 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
-import { resolve } from 'node:path';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 
 const supportedHosts = [
@@ -92,19 +93,25 @@ export async function readMetadata(url, root, options = {}) {
     return cached;
   }
 
-  const json = await runYtDlp(
-    [
-      ...commonArgs(url, options),
-      '--skip-download',
-      '--dump-single-json',
-      url,
-    ],
-    {
-      root,
-      timeoutMs: 90_000,
-      maxOutputBytes: 20 * 1024 * 1024,
-    },
-  );
+  const common = commonArgs(url, options);
+  let json;
+  try {
+    json = await runYtDlp(
+      [
+        ...common.args,
+        '--skip-download',
+        '--dump-single-json',
+        url,
+      ],
+      {
+        root,
+        timeoutMs: 90_000,
+        maxOutputBytes: 20 * 1024 * 1024,
+      },
+    );
+  } finally {
+    common.cleanup();
+  }
 
   let data;
   try {
@@ -133,6 +140,7 @@ export async function resolveDirectDownload(url, root, options = {}) {
   const quality = options.quality || 'best';
   const cacheKey = buildCacheKey('direct', url, {
     cookiesBrowser: options.cookiesBrowser,
+    cookiesText: options.cookiesText,
     quality,
   });
   const cached = readCache(directDownloadCache, cacheKey, directDownloadCacheTtlMs);
@@ -140,23 +148,29 @@ export async function resolveDirectDownload(url, root, options = {}) {
     return cached;
   }
 
-  const result = await runYtDlp(
-    [
-      ...commonArgs(url, options),
-      '--quiet',
-      '--no-progress',
-      '--format',
-      directQualityToFormat(quality),
-      '--skip-download',
-      '--dump-single-json',
-      url,
-    ],
-    {
-      root,
-      timeoutMs: 45_000,
-      maxOutputBytes: 20 * 1024 * 1024,
-    },
-  );
+  const common = commonArgs(url, options);
+  let result;
+  try {
+    result = await runYtDlp(
+      [
+        ...common.args,
+        '--quiet',
+        '--no-progress',
+        '--format',
+        directQualityToFormat(quality),
+        '--skip-download',
+        '--dump-single-json',
+        url,
+      ],
+      {
+        root,
+        timeoutMs: 45_000,
+        maxOutputBytes: 20 * 1024 * 1024,
+      },
+    );
+  } finally {
+    common.cleanup();
+  }
 
   let data;
   try {
@@ -185,8 +199,12 @@ export async function resolveDirectDownload(url, root, options = {}) {
   return payload;
 }
 
-export async function fetchDirectDownload({ url, quality, cookiesBrowser, root, signal }) {
-  const direct = await resolveDirectDownload(url, root, { quality, cookiesBrowser });
+export async function fetchDirectDownload({ url, quality, cookiesBrowser, cookiesText, root, signal }) {
+  const direct = await resolveDirectDownload(url, root, { quality, cookiesBrowser, cookiesText });
+  return fetchResolvedDirectDownload({ direct, signal });
+}
+
+export async function fetchResolvedDirectDownload({ direct, signal }) {
   const headers = filterDownloadHeaders(direct.headers);
   const response = await fetch(direct.sourceUrl, {
     headers,
@@ -204,7 +222,7 @@ export async function fetchDirectDownload({ url, quality, cookiesBrowser, root, 
   return response;
 }
 
-export function streamDownload({ url, quality, cookiesBrowser, root }) {
+export function streamDownload({ url, quality, cookiesBrowser, cookiesText, root }) {
   assertKnownHost(url);
 
   const command = resolveYtDlp(root);
@@ -214,8 +232,9 @@ export function streamDownload({ url, quality, cookiesBrowser, root }) {
     throw error;
   }
 
+  const common = commonArgs(url, { cookiesBrowser, cookiesText });
   const args = [
-    ...commonArgs(url, { cookiesBrowser }),
+    ...common.args,
     '--quiet',
     '--no-progress',
     '--concurrent-fragments',
@@ -227,14 +246,17 @@ export function streamDownload({ url, quality, cookiesBrowser, root }) {
     url,
   ];
 
-  return spawn(command.cmd, [...command.prefixArgs, ...args], {
+  const child = spawn(command.cmd, [...command.prefixArgs, ...args], {
     cwd: root,
     env: command.env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  child.once('close', common.cleanup);
+  child.once('error', common.cleanup);
+  return child;
 }
 
-export function startDownload({ url, quality, cookiesBrowser, root, downloadsDir, onUpdate }) {
+export function startDownload({ url, quality, cookiesBrowser, cookiesText, root, downloadsDir, onUpdate }) {
   assertKnownHost(url);
 
   const id = randomUUID();
@@ -258,8 +280,9 @@ export function startDownload({ url, quality, cookiesBrowser, root, downloadsDir
     onUpdate({ ...job });
   };
 
+  const common = commonArgs(url, { cookiesBrowser, cookiesText });
   const args = [
-    ...commonArgs(url, { cookiesBrowser }),
+    ...common.args,
     '--newline',
     '--merge-output-format',
     'mp4',
@@ -297,6 +320,8 @@ export function startDownload({ url, quality, cookiesBrowser, root, downloadsDir
       env: command.env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    child.once('close', common.cleanup);
+    child.once('error', common.cleanup);
 
     let stderr = '';
     let lastLine = '';
@@ -369,21 +394,26 @@ function commonArgs(url, options = {}) {
     '--no-warnings',
     '--restrict-filenames',
   ];
+  let cleanup = () => {};
 
   if (detectPlatform(url) === 'TikTok' && process.env.YT_DLP_IMPERSONATE !== '0') {
     args.push('--impersonate', process.env.YT_DLP_IMPERSONATE || 'chrome');
   }
 
-  if (process.env.YT_DLP_COOKIES) {
+  if (options.cookiesText) {
+    const tempCookies = writeTempCookies(options.cookiesText);
+    args.push('--cookies', tempCookies.path);
+    cleanup = tempCookies.cleanup;
+  } else if (process.env.YT_DLP_COOKIES) {
     args.push('--cookies', process.env.YT_DLP_COOKIES);
+  } else {
+    const cookiesBrowser = options.cookiesBrowser || process.env.YT_DLP_COOKIES_FROM_BROWSER;
+    if (cookiesBrowser) {
+      args.push('--cookies-from-browser', cookiesBrowser);
+    }
   }
 
-  const cookiesBrowser = options.cookiesBrowser || process.env.YT_DLP_COOKIES_FROM_BROWSER;
-  if (cookiesBrowser) {
-    args.push('--cookies-from-browser', cookiesBrowser);
-  }
-
-  return args;
+  return { args, cleanup };
 }
 
 function qualityToFormat(quality) {
@@ -642,6 +672,7 @@ function buildCacheKey(kind, url, options = {}) {
     url,
     quality: options.quality || '',
     cookiesBrowser: options.cookiesBrowser || '',
+    cookiesTextHash: options.cookiesText ? hashText(options.cookiesText) : '',
   });
 }
 
@@ -675,6 +706,33 @@ function updateFilePath(value, update) {
     filePath: cleaned,
     fileName,
   });
+}
+
+function writeTempCookies(cookiesText) {
+  const dir = mkdtempSync(join(tmpdir(), 'linkvault-cookies-'));
+  const path = join(dir, 'cookies.txt');
+  writeFileSync(path, normalizeCookiesText(cookiesText), { mode: 0o600 });
+  return {
+    path,
+    cleanup: once(() => rmSync(dir, { recursive: true, force: true })),
+  };
+}
+
+function normalizeCookiesText(value) {
+  return String(value || '').replace(/\r\n?/g, '\n').trimEnd() + '\n';
+}
+
+function hashText(value) {
+  return createHash('sha256').update(String(value || '')).digest('hex');
+}
+
+function once(fn) {
+  let called = false;
+  return () => {
+    if (called) return;
+    called = true;
+    fn();
+  };
 }
 
 export function cleanYtDlpError(stderr) {

@@ -1,5 +1,6 @@
 import express from 'express';
 import { existsSync, readdirSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { Readable } from 'node:stream';
@@ -8,6 +9,7 @@ import {
   cleanYtDlpError,
   detectPlatform,
   fetchDirectDownload,
+  fetchResolvedDirectDownload,
   getYtDlpStatus,
   readMetadata,
   resolveDirectDownload,
@@ -23,6 +25,8 @@ const root = resolve(__dirname, '..');
 const port = Number(process.env.PORT || 8787);
 const app = express();
 const feedbackRateLimit = new Map();
+const downloadSessions = new Map();
+const downloadSessionTtlMs = 10 * 60 * 1000;
 
 app.use(express.json({ limit: '1mb' }));
 app.use((req, res, next) => {
@@ -76,8 +80,8 @@ app.post('/api/feedback', async (req, res) => {
 app.post('/api/metadata', async (req, res) => {
   try {
     const url = assertSupportedUrl(req.body?.url);
-    const cookiesBrowser = normalizeCookiesBrowser(req.body?.cookiesBrowser, req.body?.cookiesProfile);
-    const metadata = await readMetadata(url, root, { cookiesBrowser });
+    const cookieOptions = normalizeCookieOptions(req.body);
+    const metadata = await readMetadata(url, root, cookieOptions);
     res.json({
       ok: true,
       ...metadata,
@@ -99,11 +103,31 @@ app.post('/api/metadata', async (req, res) => {
 });
 
 app.post('/api/download-url', async (req, res) => {
+  let url;
+  let quality;
+  let cookieOptions;
+  let fileName;
   try {
-    const url = assertSupportedUrl(req.body?.url);
-    const quality = normalizeQuality(req.body?.quality);
-    const cookiesBrowser = normalizeCookiesBrowser(req.body?.cookiesBrowser, req.body?.cookiesProfile);
-    await resolveDirectDownload(url, root, { quality, cookiesBrowser });
+    url = assertSupportedUrl(req.body?.url);
+    quality = normalizeQuality(req.body?.quality);
+    cookieOptions = normalizeCookieOptions(req.body);
+    fileName = buildDownloadFileName(url, req.body?.title);
+    const direct = await resolveDirectDownload(url, root, { quality, ...cookieOptions });
+
+    if (cookieOptions.cookiesText) {
+      const token = createDownloadSession({
+        type: 'direct',
+        direct,
+        fileName,
+      });
+      res.json({
+        ok: true,
+        mode: 'direct-session',
+        url: buildApiUrl(req, '/api/download-direct', { token }),
+        fileName,
+      });
+      return;
+    }
 
     res.json({
       ok: true,
@@ -115,9 +139,27 @@ app.post('/api/download-url', async (req, res) => {
         cookiesProfile: req.body?.cookiesProfile || '',
         title: req.body?.title || 'video',
       }),
-      fileName: buildDownloadFileName(url, req.body?.title),
+      fileName,
     });
   } catch (error) {
+    if (error.handled && cookieOptions?.cookiesText && url) {
+      const token = createDownloadSession({
+        type: 'stream',
+        url,
+        quality,
+        cookieOptions,
+        fileName,
+      });
+      res.json({
+        ok: true,
+        mode: 'stream-session',
+        url: buildApiUrl(req, '/api/download-local', { token }),
+        fileName,
+        message: error.message || 'Using authenticated streaming download.',
+      });
+      return;
+    }
+
     if (error.handled) {
       res.json({
         ok: false,
@@ -139,6 +181,16 @@ app.get('/api/download-local', (req, res) => {
 
 app.get('/api/download-direct', async (req, res) => {
   try {
+    const tokenSession = readDownloadSession(req.query?.token, 'direct');
+    if (tokenSession) {
+      const upstream = await fetchResolvedDirectDownload({
+        direct: tokenSession.direct,
+        signal: req.signal,
+      });
+      sendUpstreamDownload(res, upstream, tokenSession.fileName);
+      return;
+    }
+
     const url = assertSupportedUrl(req.query?.url);
     const quality = normalizeQuality(req.query?.quality);
     const cookiesBrowser = normalizeCookiesBrowser(req.query?.cookiesBrowser, req.query?.cookiesProfile);
@@ -151,16 +203,9 @@ app.get('/api/download-direct', async (req, res) => {
       signal: req.signal,
     });
 
-    res.status(200);
-    res.setHeader('Content-Type', upstream.headers.get('content-type') || 'video/mp4');
-    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-    const contentLength = upstream.headers.get('content-length');
-    if (contentLength) {
-      res.setHeader('Content-Length', contentLength);
-    }
-    Readable.fromWeb(upstream.body).pipe(res);
+    sendUpstreamDownload(res, upstream, fileName);
   } catch (error) {
-    if (!res.headersSent && error.handled) {
+    if (!res.headersSent && error.handled && !req.query?.token) {
       streamYtDlpDownload(req, res);
       return;
     }
@@ -177,14 +222,17 @@ app.get('/api/download-direct', async (req, res) => {
 
 function streamYtDlpDownload(req, res) {
   try {
-    const url = assertSupportedUrl(req.query?.url);
-    const quality = normalizeQuality(req.query?.quality);
-    const cookiesBrowser = normalizeCookiesBrowser(req.query?.cookiesBrowser, req.query?.cookiesProfile);
-    const fileName = buildDownloadFileName(url, req.query?.title);
+    const tokenSession = readDownloadSession(req.query?.token, 'stream');
+    const url = tokenSession?.url || assertSupportedUrl(req.query?.url);
+    const quality = tokenSession?.quality || normalizeQuality(req.query?.quality);
+    const cookieOptions = tokenSession?.cookieOptions || {
+      cookiesBrowser: normalizeCookiesBrowser(req.query?.cookiesBrowser, req.query?.cookiesProfile),
+    };
+    const fileName = tokenSession?.fileName || buildDownloadFileName(url, req.query?.title);
     const child = streamDownload({
       url,
       quality,
-      cookiesBrowser,
+      ...cookieOptions,
       root,
     });
 
@@ -298,6 +346,96 @@ function normalizeCookiesBrowser(value, profileValue) {
   }
 
   return `${normalized}:${profile}`;
+}
+
+function normalizeCookieOptions(source) {
+  const cookiesText = normalizeCookiesText(source?.cookiesText);
+  if (cookiesText) {
+    return {
+      cookiesBrowser: null,
+      cookiesText,
+    };
+  }
+
+  return {
+    cookiesBrowser: normalizeCookiesBrowser(source?.cookiesBrowser, source?.cookiesProfile),
+  };
+}
+
+function normalizeCookiesText(value) {
+  if (!value) return null;
+
+  const text = String(value).replace(/\r\n?/g, '\n').trim();
+  if (!text) return null;
+  if (text.length > 300_000) {
+    const error = new Error('Cookies file is too large. Export only YouTube cookies and try again.');
+    error.status = 400;
+    throw error;
+  }
+
+  const meaningfulLines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'));
+  const looksLikeCookiesTxt = meaningfulLines.some((line) => line.split('\t').length >= 7);
+  const hasRelevantHost = meaningfulLines.some((line) => /(^|\.)youtube\.com|(^|\.)google\.com/i.test(line));
+  if (!looksLikeCookiesTxt || !hasRelevantHost) {
+    const error = new Error('Paste a Netscape cookies.txt export that includes YouTube or Google cookies.');
+    error.status = 400;
+    throw error;
+  }
+
+  return `${text}\n`;
+}
+
+function createDownloadSession(payload) {
+  sweepDownloadSessions();
+  const token = randomUUID();
+  downloadSessions.set(token, {
+    ...payload,
+    expiresAt: Date.now() + downloadSessionTtlMs,
+  });
+  return token;
+}
+
+function readDownloadSession(value, type) {
+  if (!value) return null;
+  const token = String(value);
+  const session = downloadSessions.get(token);
+  if (!session) {
+    const error = new Error('Download session expired. Inspect the link again and retry.');
+    error.status = 410;
+    throw error;
+  }
+
+  if (session.expiresAt < Date.now() || session.type !== type) {
+    downloadSessions.delete(token);
+    const error = new Error('Download session expired. Inspect the link again and retry.');
+    error.status = 410;
+    throw error;
+  }
+
+  return session;
+}
+
+function sweepDownloadSessions() {
+  const now = Date.now();
+  for (const [token, session] of downloadSessions) {
+    if (session.expiresAt < now) {
+      downloadSessions.delete(token);
+    }
+  }
+}
+
+function sendUpstreamDownload(res, upstream, fileName) {
+  res.status(200);
+  res.setHeader('Content-Type', upstream.headers.get('content-type') || 'video/mp4');
+  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+  const contentLength = upstream.headers.get('content-length');
+  if (contentLength) {
+    res.setHeader('Content-Length', contentLength);
+  }
+  Readable.fromWeb(upstream.body).pipe(res);
 }
 
 function buildDownloadFileName(url, title) {

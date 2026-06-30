@@ -24,3 +24,8 @@ CLIENT_ORIGIN=http://localhost:5173
 YT_DLP_COOKIES=/absolute/path/to/cookies.txt
 YT_DLP_COOKIES_FROM_BROWSER=chrome:Default
 ```
+
+For YouTube links blocked by datacenter traffic, the frontend can send a
+temporary Netscape `cookies.txt` export with the metadata/download request. The
+API writes it to a short-lived local temp file for `yt-dlp` and keeps download
+session tokens in memory; cookies are not placed in download URLs.
