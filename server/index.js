@@ -51,6 +51,8 @@ app.get('/api/health', async (_req, res) => {
   res.json({
     ok: true,
     ytDlp,
+    hostedRuntime: isHostedRuntime(),
+    browserCookiesAvailable: !isHostedRuntime(),
     saveMode: 'browser',
   });
 });
@@ -326,6 +328,12 @@ function normalizeCookiesBrowser(value, profileValue) {
     return null;
   }
 
+  if (isHostedRuntime()) {
+    const error = new Error('Hosted Render API cannot read Chrome/Safari/Firefox cookies from your computer. Paste an exported YouTube cookies.txt file instead.');
+    error.status = 400;
+    throw error;
+  }
+
   const allowed = new Set(['chrome', 'chromium', 'edge', 'firefox', 'safari', 'brave', 'vivaldi', 'opera']);
   const normalized = String(value).trim().toLowerCase();
   if (!allowed.has(normalized)) {
@@ -522,6 +530,10 @@ function readProfileDirs(basePath) {
 
 function getClientIp(req) {
   return String(req.get('x-forwarded-for') || req.ip || 'unknown').split(',')[0].trim();
+}
+
+function isHostedRuntime() {
+  return Boolean(process.env.RENDER || process.env.RENDER_SERVICE_ID || process.env.RENDER_EXTERNAL_URL);
 }
 
 function enforceFeedbackRateLimit(ip) {

@@ -807,6 +807,10 @@ export function cleanYtDlpError(stderr) {
     return 'macOS blocked Safari cookie access. Grant your terminal Full Disk Access in System Settings, or choose a different browser such as Chrome.';
   }
 
+  if (/could not find .*cookies database|could not find .*cookies/i.test(message)) {
+    return 'This hosted API cannot read browser cookies from your computer. Paste an exported YouTube cookies.txt file instead of choosing Chrome/Safari/Firefox browser cookies.';
+  }
+
   if (/TikTok.*Unable to extract webpage video data/i.test(message)) {
     return 'TikTok did not expose video data for this request. Use the exact TikTok share URL, confirm the video is public, and try the browser cookies option for the browser where you are logged in.';
   }
