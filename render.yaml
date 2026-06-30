@@ -7,7 +7,7 @@ services:
     branch: main
     buildCommand: npm ci && npm run setup:yt-dlp
     startCommand: npm start
-    healthCheckPath: /api/health
+    healthCheckPath: /api/healthz
     autoDeploy: true
     envVars:
       - key: CLIENT_ORIGIN

@@ -30,6 +30,10 @@ app.use((req, res, next) => {
   next();
 });
 
+app.get('/api/healthz', (_req, res) => {
+  res.json({ ok: true });
+});
+
 app.get('/api/health', async (_req, res) => {
   const ytDlp = await getYtDlpStatus(root);
   res.json({
