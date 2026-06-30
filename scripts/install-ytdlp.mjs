@@ -7,6 +7,9 @@ const PYTHON_STANDALONE_URL =
   'https://github.com/astral-sh/python-build-standalone/releases/download/20260623/cpython-3.12.13%2B20260623-aarch64-apple-darwin-install_only_stripped.tar.gz';
 const YT_DLP_SOURCE_URL =
   'yt-dlp[default,curl-cffi] @ https://github.com/yt-dlp/yt-dlp/archive/refs/tags/2026.06.09.zip';
+const POT_PROVIDER_PACKAGE = 'bgutil-ytdlp-pot-provider==1.3.1';
+const BGUTIL_PROVIDER_REPO = 'https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git';
+const BGUTIL_PROVIDER_VERSION = '1.3.1';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
@@ -14,6 +17,8 @@ const vendorRoot = resolve(root, '.vendor');
 const python312Dir = resolve(vendorRoot, 'python312');
 const python312 = resolve(python312Dir, 'bin/python3');
 const ytDlpPy312Dir = resolve(vendorRoot, 'yt-dlp-py312');
+const bgutilProviderDir = resolve(vendorRoot, 'bgutil-ytdlp-pot-provider');
+const bgutilServerDir = resolve(bgutilProviderDir, 'server');
 
 if (process.platform === 'darwin' && process.arch === 'arm64') {
   installPortablePythonYtDlp();
@@ -58,7 +63,10 @@ function installPortablePythonYtDlp() {
     '--target',
     ytDlpPy312Dir,
     YT_DLP_SOURCE_URL,
+    POT_PROVIDER_PACKAGE,
   ], 'Failed to install yt-dlp with portable Python 3.12.');
+
+  installBgutilProvider();
 
   const verify = spawnSync(
     python312,
@@ -96,7 +104,10 @@ function installSystemPythonYtDlp() {
     '--target',
     vendorDir,
     'yt-dlp[default,curl-cffi]',
+    POT_PROVIDER_PACKAGE,
   ], 'Failed to install yt-dlp. Check Python/pip and network access, then retry.');
+
+  installBgutilProvider();
 
   const verify = spawnSync(
     python,
@@ -121,9 +132,36 @@ function installSystemPythonYtDlp() {
   console.log(`\nyt-dlp ${verify.stdout.trim()} installed into ${vendorDir}`);
 }
 
-function run(command, args, failureMessage) {
+function installBgutilProvider() {
+  if (process.env.DISABLE_BGUTIL_POT_PROVIDER === '1') {
+    console.log('\nSkipping bgutil PO token provider install.');
+    return;
+  }
+
+  rmSync(bgutilProviderDir, { recursive: true, force: true });
+  run('git', [
+    'clone',
+    '--depth',
+    '1',
+    '--branch',
+    BGUTIL_PROVIDER_VERSION,
+    BGUTIL_PROVIDER_REPO,
+    bgutilProviderDir,
+  ], 'Failed to download bgutil PO token provider.');
+
+  run('npm', ['ci'], 'Failed to install bgutil PO token provider dependencies.', {
+    cwd: bgutilServerDir,
+  });
+  run('npx', ['tsc'], 'Failed to build bgutil PO token provider.', {
+    cwd: bgutilServerDir,
+  });
+
+  console.log(`\nbgutil PO token provider installed into ${bgutilProviderDir}`);
+}
+
+function run(command, args, failureMessage, options = {}) {
   const result = spawnSync(command, args, {
-    cwd: root,
+    cwd: options.cwd || root,
     env: {
       ...process.env,
       PYTHONNOUSERSITE: '1',

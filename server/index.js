@@ -11,6 +11,7 @@ import {
   fetchDirectDownload,
   fetchResolvedDirectDownload,
   getYtDlpStatus,
+  getYoutubePotProviderStatus,
   readMetadata,
   resolveDirectDownload,
   streamDownload,
@@ -51,6 +52,7 @@ app.get('/api/health', async (_req, res) => {
   res.json({
     ok: true,
     ytDlp,
+    youtubePotProvider: getYoutubePotProviderStatus(root),
     hostedRuntime: isHostedRuntime(),
     browserCookiesAvailable: !isHostedRuntime(),
     saveMode: 'browser',

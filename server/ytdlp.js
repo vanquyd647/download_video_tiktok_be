@@ -85,6 +85,29 @@ export async function getYtDlpStatus(root) {
   return cachedYtDlpStatus;
 }
 
+export function getYoutubePotProviderStatus(root) {
+  if (process.env.DISABLE_BGUTIL_POT_PROVIDER === '1') {
+    return {
+      available: false,
+      mode: 'disabled',
+    };
+  }
+
+  if (process.env.YT_DLP_POT_PROVIDER_ARGS) {
+    return {
+      available: true,
+      mode: 'custom',
+    };
+  }
+
+  const serverHome = process.env.BGUTIL_POT_PROVIDER_HOME
+    || resolve(root, '.vendor/bgutil-ytdlp-pot-provider/server');
+  return {
+    available: existsSync(serverHome),
+    mode: 'bgutil-script',
+  };
+}
+
 export async function readMetadata(url, root, options = {}) {
   assertKnownHost(url);
   const cacheKey = buildCacheKey('metadata', url, options);
@@ -401,9 +424,8 @@ function commonArgs(url, options = {}) {
     args.push('--impersonate', process.env.YT_DLP_IMPERSONATE || 'chrome');
   }
 
-  const youtubeExtractorArgs = buildYoutubeExtractorArgs(url, options);
-  if (youtubeExtractorArgs) {
-    args.push('--extractor-args', youtubeExtractorArgs);
+  for (const extractorArgs of buildYoutubeExtractorArgs(url, options)) {
+    args.push('--extractor-args', extractorArgs);
   }
 
   if (options.cookiesText) {
@@ -743,14 +765,14 @@ function once(fn) {
 }
 
 function buildYoutubeExtractorArgs(url, options = {}) {
-  if (detectPlatform(url) !== 'YouTube') return null;
+  if (detectPlatform(url) !== 'YouTube') return [];
 
   if (process.env.YT_DLP_YOUTUBE_EXTRACTOR_ARGS) {
-    return process.env.YT_DLP_YOUTUBE_EXTRACTOR_ARGS;
+    return [process.env.YT_DLP_YOUTUBE_EXTRACTOR_ARGS];
   }
 
   const clients = sanitizeYoutubeClients(
-    process.env.YT_DLP_YOUTUBE_CLIENTS || (options.poToken ? 'default,mweb,web_safari,web' : 'default,web_safari,mweb'),
+    process.env.YT_DLP_YOUTUBE_CLIENTS || 'default,mweb,web_safari,web',
   );
   const parts = [`player-client=${clients}`];
 
@@ -758,7 +780,24 @@ function buildYoutubeExtractorArgs(url, options = {}) {
     parts.push(`po_token=${buildPoTokenArg(clients, options.poToken)}`);
   }
 
-  return `youtube:${parts.join(';')}`;
+  return [
+    `youtube:${parts.join(';')}`,
+    ...buildYoutubePotProviderArgs(),
+  ];
+}
+
+function buildYoutubePotProviderArgs() {
+  if (process.env.DISABLE_BGUTIL_POT_PROVIDER === '1') return [];
+
+  if (process.env.YT_DLP_POT_PROVIDER_ARGS) {
+    return [process.env.YT_DLP_POT_PROVIDER_ARGS];
+  }
+
+  const serverHome = process.env.BGUTIL_POT_PROVIDER_HOME
+    || resolve(process.cwd(), '.vendor/bgutil-ytdlp-pot-provider/server');
+  if (!existsSync(serverHome)) return [];
+
+  return [`youtubepot-bgutilscript:server_home=${serverHome}`];
 }
 
 function sanitizeYoutubeClients(value) {
