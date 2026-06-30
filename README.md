@@ -24,7 +24,7 @@ CLIENT_ORIGIN=http://localhost:5173
 YT_DLP_COOKIES=/absolute/path/to/cookies.txt
 YT_DLP_COOKIES_FROM_BROWSER=chrome:Default
 YT_DLP_YOUTUBE_CLIENTS=default,web_safari,mweb
-YT_DLP_YOUTUBE_EXTRACTOR_ARGS=youtube:player_client=default,web_safari,mweb
+YT_DLP_YOUTUBE_EXTRACTOR_ARGS=youtube:player-client=default,web_safari,mweb
 ```
 
 For YouTube links blocked by datacenter traffic, the frontend can send a
@@ -32,3 +32,8 @@ temporary Netscape `cookies.txt` export with the metadata/download request. The
 API writes it to a short-lived local temp file for `yt-dlp` and keeps download
 session tokens in memory; cookies and optional PO tokens are not placed in
 download URLs.
+
+If fresh cookies still fail, paste a matching YouTube GVS PO token from the same
+browser session into the optional PO token field. The API accepts either a raw
+token or a full `mweb.gvs+TOKEN` / `web.gvs+TOKEN` value and passes the modern
+`CLIENT.CONTEXT+TOKEN` form to `yt-dlp`.

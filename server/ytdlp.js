@@ -750,9 +750,9 @@ function buildYoutubeExtractorArgs(url, options = {}) {
   }
 
   const clients = sanitizeYoutubeClients(
-    process.env.YT_DLP_YOUTUBE_CLIENTS || (options.poToken ? 'web,mweb,default' : 'default,web_safari,mweb'),
+    process.env.YT_DLP_YOUTUBE_CLIENTS || (options.poToken ? 'default,mweb,web_safari,web' : 'default,web_safari,mweb'),
   );
-  const parts = [`player_client=${clients}`];
+  const parts = [`player-client=${clients}`];
 
   if (options.poToken) {
     parts.push(`po_token=${buildPoTokenArg(clients, options.poToken)}`);
@@ -782,11 +782,29 @@ function sanitizeYoutubeClients(value) {
 function buildPoTokenArg(clients, token) {
   const cleanedToken = String(token || '').trim();
   if (!cleanedToken) return '';
+
+  if (looksLikePoTokenSpec(cleanedToken)) {
+    return cleanedToken
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .join(',');
+  }
+
+  const contexts = ['gvs'];
   return clients
     .split(',')
     .filter((client) => client && client !== 'default')
-    .map((client) => `${client}+${cleanedToken}`)
+    .flatMap((client) => contexts.map((context) => `${client}.${context}+${cleanedToken}`))
     .join(',');
+}
+
+function looksLikePoTokenSpec(value) {
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .every((item) => /^[a-z_]+\.(?:gvs|player|subs)\+.+$/i.test(item));
 }
 
 export function cleanYtDlpError(stderr) {
