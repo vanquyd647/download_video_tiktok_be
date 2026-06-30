@@ -14,3 +14,5 @@ services:
         value: "*"
       - key: YT_DLP_IMPERSONATE
         value: chrome
+      - key: YT_DLP_CONCURRENT_FRAGMENTS
+        value: "8"

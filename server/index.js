@@ -8,6 +8,7 @@ import {
   detectPlatform,
   getYtDlpStatus,
   readMetadata,
+  resolveDirectDownload,
   streamDownload,
 } from './ytdlp.js';
 
@@ -70,6 +71,34 @@ app.post('/api/metadata', async (req, res) => {
 
     res.status(error.status || 500).json({
       message: error.message || 'Could not read video metadata.',
+    });
+  }
+});
+
+app.post('/api/download-url', async (req, res) => {
+  try {
+    const url = assertSupportedUrl(req.body?.url);
+    const quality = normalizeQuality(req.body?.quality);
+    const cookiesBrowser = normalizeCookiesBrowser(req.body?.cookiesBrowser, req.body?.cookiesProfile);
+    const direct = await resolveDirectDownload(url, root, { quality, cookiesBrowser });
+
+    res.json({
+      ok: true,
+      ...direct,
+      fileName: buildDownloadFileName(url, req.body?.title),
+    });
+  } catch (error) {
+    if (error.handled) {
+      res.json({
+        ok: false,
+        fallback: 'proxy',
+        message: error.message || 'Could not resolve a direct download URL.',
+      });
+      return;
+    }
+
+    res.status(error.status || 500).json({
+      message: error.message || 'Could not resolve a direct download URL.',
     });
   }
 });

@@ -9,6 +9,13 @@ const supportedHosts = [
   /(^|\.)fb\.watch$/i,
 ];
 let cachedYtDlpCommand = null;
+let cachedYtDlpStatus = null;
+let cachedYtDlpStatusAt = 0;
+const metadataCache = new Map();
+const directDownloadCache = new Map();
+const statusCacheTtlMs = 5 * 60 * 1000;
+const metadataCacheTtlMs = 10 * 60 * 1000;
+const directDownloadCacheTtlMs = 10 * 60 * 1000;
 
 export function detectPlatform(url) {
   try {
@@ -23,12 +30,18 @@ export function detectPlatform(url) {
 }
 
 export async function getYtDlpStatus(root) {
+  if (cachedYtDlpStatus && Date.now() - cachedYtDlpStatusAt < statusCacheTtlMs) {
+    return cachedYtDlpStatus;
+  }
+
   const command = resolveYtDlp(root);
   if (!command) {
-    return {
+    cachedYtDlpStatus = {
       available: false,
       message: 'yt-dlp is not installed. Run npm run setup:yt-dlp.',
     };
+    cachedYtDlpStatusAt = Date.now();
+    return cachedYtDlpStatus;
   }
 
   const result = spawnSync(command.cmd, [...command.prefixArgs, '--version'], {
@@ -38,21 +51,31 @@ export async function getYtDlpStatus(root) {
   });
 
   if (result.status !== 0) {
-    return {
+    cachedYtDlpStatus = {
       available: false,
       message: (result.stderr || result.error?.message || 'yt-dlp could not be started.').trim(),
     };
+    cachedYtDlpStatusAt = Date.now();
+    return cachedYtDlpStatus;
   }
 
-  return {
+  cachedYtDlpStatus = {
     available: true,
     version: result.stdout.trim(),
     runtime: command.label,
   };
+  cachedYtDlpStatusAt = Date.now();
+  return cachedYtDlpStatus;
 }
 
 export async function readMetadata(url, root, options = {}) {
   assertKnownHost(url);
+  const cacheKey = buildCacheKey('metadata', url, options);
+  const cached = readCache(metadataCache, cacheKey, metadataCacheTtlMs);
+  if (cached) {
+    return cached;
+  }
+
   const json = await runYtDlp(
     [
       ...commonArgs(url, options),
@@ -76,7 +99,7 @@ export async function readMetadata(url, root, options = {}) {
     throw error;
   }
 
-  return {
+  const metadata = {
     id: data.id,
     title: data.title || 'Untitled video',
     uploader: data.uploader || data.channel || data.creator || 'Unknown creator',
@@ -85,6 +108,58 @@ export async function readMetadata(url, root, options = {}) {
     webpageUrl: data.webpage_url || url,
     formats: summarizeFormats(data.formats || []),
   };
+  writeCache(metadataCache, cacheKey, metadata);
+  return metadata;
+}
+
+export async function resolveDirectDownload(url, root, options = {}) {
+  assertKnownHost(url);
+  const quality = options.quality || 'best';
+  const cacheKey = buildCacheKey('direct', url, {
+    cookiesBrowser: options.cookiesBrowser,
+    quality,
+  });
+  const cached = readCache(directDownloadCache, cacheKey, directDownloadCacheTtlMs);
+  if (cached) {
+    return cached;
+  }
+
+  const result = await runYtDlp(
+    [
+      ...commonArgs(url, options),
+      '--quiet',
+      '--no-progress',
+      '--format',
+      directQualityToFormat(quality),
+      '--get-url',
+      url,
+    ],
+    {
+      root,
+      timeoutMs: 45_000,
+      maxOutputBytes: 2 * 1024 * 1024,
+    },
+  );
+
+  const urls = result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => /^https?:\/\//i.test(line));
+
+  if (urls.length !== 1) {
+    const error = new Error('Could not resolve a single direct media URL. Falling back to server streaming.');
+    error.status = 409;
+    error.handled = true;
+    throw error;
+  }
+
+  const payload = {
+    url: urls[0],
+    mode: 'direct',
+    cachedAt: new Date().toISOString(),
+  };
+  writeCache(directDownloadCache, cacheKey, payload);
+  return payload;
 }
 
 export function streamDownload({ url, quality, cookiesBrowser, root }) {
@@ -101,6 +176,8 @@ export function streamDownload({ url, quality, cookiesBrowser, root }) {
     ...commonArgs(url, { cookiesBrowser }),
     '--quiet',
     '--no-progress',
+    '--concurrent-fragments',
+    process.env.YT_DLP_CONCURRENT_FRAGMENTS || '8',
     '--format',
     streamQualityToFormat(quality),
     '--output',
@@ -287,6 +364,14 @@ function streamQualityToFormat(quality) {
   return 'b[ext=mp4]/best';
 }
 
+function directQualityToFormat(quality) {
+  if (quality === 'best') {
+    return 'b[ext=mp4]/best[ext=mp4]/best';
+  }
+
+  return streamQualityToFormat(quality);
+}
+
 function summarizeFormats(formats) {
   const seen = new Set();
   return formats
@@ -454,6 +539,36 @@ function runYtDlp(args, { root, timeoutMs, maxOutputBytes }) {
       error.handled = true;
       reject(error);
     });
+  });
+}
+
+function buildCacheKey(kind, url, options = {}) {
+  return JSON.stringify({
+    kind,
+    url,
+    quality: options.quality || '',
+    cookiesBrowser: options.cookiesBrowser || '',
+  });
+}
+
+function readCache(cache, key, ttlMs) {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.createdAt > ttlMs) {
+    cache.delete(key);
+    return null;
+  }
+  return entry.value;
+}
+
+function writeCache(cache, key, value) {
+  if (cache.size > 200) {
+    const firstKey = cache.keys().next().value;
+    cache.delete(firstKey);
+  }
+  cache.set(key, {
+    createdAt: Date.now(),
+    value,
   });
 }
 
