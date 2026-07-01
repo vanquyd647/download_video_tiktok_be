@@ -26,6 +26,10 @@ services:
         value: "10"
       - key: YT_DLP_SLEEP_REQUESTS
         value: "1"
+      - key: YT_DLP_REMOTE_COMPONENTS
+        value: ejs:github
+      - key: YT_DLP_JS_RUNTIMES
+        value: node
       - key: YT_DLP_PROXY
         sync: false
       - key: YOUTUBE_PO_TOKEN

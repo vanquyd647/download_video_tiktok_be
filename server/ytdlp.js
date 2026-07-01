@@ -480,6 +480,16 @@ function commonArgs(url, options = {}) {
       '--force-ipv4',
     );
 
+    const remoteComponents = process.env.YT_DLP_REMOTE_COMPONENTS || 'ejs:github';
+    if (remoteComponents !== '0') {
+      args.push('--remote-components', remoteComponents);
+    }
+
+    const jsRuntimes = process.env.YT_DLP_JS_RUNTIMES || 'node';
+    if (jsRuntimes !== '0') {
+      args.push('--js-runtimes', jsRuntimes);
+    }
+
     if (process.env.YT_DLP_SLEEP_INTERVAL !== '0') {
       args.push(
         '--sleep-interval',

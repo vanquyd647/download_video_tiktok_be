@@ -35,6 +35,8 @@ YT_DLP_FRAGMENT_RETRIES=3
 YT_DLP_SLEEP_INTERVAL=5
 YT_DLP_MAX_SLEEP_INTERVAL=10
 YT_DLP_SLEEP_REQUESTS=1
+YT_DLP_REMOTE_COMPONENTS=ejs:github
+YT_DLP_JS_RUNTIMES=node
 YT_DLP_PROXY=http://user:password@host:port
 DISABLE_BGUTIL_POT_PROVIDER=0
 BGUTIL_POT_PROVIDER_HOME=/absolute/path/to/bgutil-ytdlp-pot-provider/server
@@ -60,7 +62,10 @@ tokens to GitHub.
 
 For YouTube requests, the backend defaults to `--retries 3`,
 `--fragment-retries 3`, `--sleep-interval 5`, `--max-sleep-interval 10`, and
-`--sleep-requests 1`. Set `YT_DLP_SLEEP_INTERVAL=0` and
+`--sleep-requests 1`. It also enables yt-dlp's EJS challenge solver with
+`--remote-components ejs:github` and `--js-runtimes node` so YouTube n-challenge
+protected formats are not reduced to storyboard images. Set
+`YT_DLP_SLEEP_INTERVAL=0` and
 `YT_DLP_SLEEP_REQUESTS=0` if you need to disable the deliberate wait.
 
 For YouTube links blocked by datacenter traffic, the frontend can send a
