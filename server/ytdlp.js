@@ -458,6 +458,9 @@ function commonArgs(url, options = {}) {
       process.env.YT_DLP_RETRIES || '3',
       '--fragment-retries',
       process.env.YT_DLP_FRAGMENT_RETRIES || '3',
+      '--extractor-retries',
+      process.env.YT_DLP_EXTRACTOR_RETRIES || '3',
+      '--force-ipv4',
     );
 
     if (process.env.YT_DLP_SLEEP_INTERVAL !== '0') {
@@ -838,7 +841,7 @@ function buildYoutubeExtractorArgs(url, options = {}) {
   }
 
   const clients = sanitizeYoutubeClients(
-    process.env.YT_DLP_YOUTUBE_CLIENTS || 'default,mweb,web_safari,web',
+    process.env.YT_DLP_YOUTUBE_CLIENTS || 'tv,tv_simply,web_safari,mweb,web',
   );
   const parts = [`player-client=${clients}`];
 
@@ -962,7 +965,7 @@ export function cleanYtDlpError(stderr) {
   }
 
   if (/YouTube.*Sign in to confirm|confirm you.?re not a bot|HTTP Error 403|PO Token|potoken/i.test(message)) {
-    return 'YouTube blocked this request. Paste fresh YouTube cookies.txt first. If it still fails, add a matching YouTube PO token from the same browser session.';
+    return 'YouTube blocked this request. Try these steps: 1) Paste fresh YouTube cookies.txt exported from a logged-in browser. 2) If it still fails, add a YouTube PO token from the same browser session. 3) Set YT_DLP_PROXY to a residential proxy.';
   }
 
   if (/not made this video available in your country|video is not available.*your country|geo.?restrict/i.test(message)) {
