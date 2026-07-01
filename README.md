@@ -35,6 +35,7 @@ YT_DLP_FRAGMENT_RETRIES=3
 YT_DLP_SLEEP_INTERVAL=5
 YT_DLP_MAX_SLEEP_INTERVAL=10
 YT_DLP_SLEEP_REQUESTS=1
+YT_DLP_PROXY=http://user:password@host:port
 DISABLE_BGUTIL_POT_PROVIDER=0
 BGUTIL_POT_PROVIDER_HOME=/absolute/path/to/bgutil-ytdlp-pot-provider/server
 YT_DLP_POT_PROVIDER_ARGS=youtubepot-bgutilscript:server_home=/absolute/path/to/server
@@ -74,3 +75,7 @@ automatic provider still fails, paste a matching YouTube GVS PO token from the
 same browser session into the optional PO token field. The API accepts either a
 raw token or a full `mweb.gvs+TOKEN` / `web.gvs+TOKEN` value and passes the
 modern `CLIENT.CONTEXT+TOKEN` form to `yt-dlp`.
+
+If YouTube still blocks Render after fresh cookies and a PO token, configure
+`YT_DLP_PROXY` with a residential proxy. Render's datacenter IPs can be blocked
+even when the same video plays in a normal browser.

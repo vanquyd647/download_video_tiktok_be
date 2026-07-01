@@ -26,6 +26,8 @@ services:
         value: "10"
       - key: YT_DLP_SLEEP_REQUESTS
         value: "1"
+      - key: YT_DLP_PROXY
+        sync: false
       - key: YOUTUBE_PO_TOKEN
         sync: false
       - key: YOUTUBE_COOKIES_TEXT

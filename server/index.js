@@ -55,6 +55,9 @@ app.get('/api/health', async (_req, res) => {
     ytDlp,
     youtubePotProvider: getYoutubePotProviderStatus(root),
     cookiesSource: getCookiesSourceStatus(),
+    youtubeProxy: {
+      configured: Boolean(process.env.YT_DLP_PROXY),
+    },
     hostedRuntime: isHostedRuntime(),
     browserCookiesAvailable: !isHostedRuntime(),
     saveMode: 'browser',
