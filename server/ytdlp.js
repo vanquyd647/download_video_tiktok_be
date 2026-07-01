@@ -496,27 +496,27 @@ function commonArgs(url, options = {}) {
 
 function qualityToFormat(quality) {
   if (quality === 'mp4') {
-    return 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best';
+    return 'bv*[ext=mp4]+ba[ext=m4a]/bv*[ext=mp4]+ba/b[ext=mp4]/bv*+ba/b/best';
   }
 
   if (quality === 'clean') {
-    return 'bv*+ba/best';
+    return 'bv*+ba/b/best';
   }
 
-  return 'bv*+ba/best';
+  return 'bv*+ba/b/best';
 }
 
 function streamQualityToFormat(quality) {
   if (quality === 'mp4') {
-    return 'b[ext=mp4]/best[ext=mp4]/best';
+    return 'b[ext=mp4]/best[ext=mp4]/b/best';
   }
 
-  return 'b[ext=mp4]/best';
+  return 'b[ext=mp4]/b/best';
 }
 
 function directQualityToFormat(quality) {
   if (quality === 'best') {
-    return 'b[ext=mp4]/best[ext=mp4]/best';
+    return 'b[ext=mp4]/best[ext=mp4]/b/best';
   }
 
   return streamQualityToFormat(quality);
