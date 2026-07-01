@@ -436,6 +436,18 @@ function commonArgs(url, options = {}) {
   ];
   let cleanup = () => {};
 
+  const geoBypassCountry = process.env.YT_DLP_GEO_BYPASS_COUNTRY;
+  if (geoBypassCountry) {
+    args.push('--geo-bypass-country', geoBypassCountry);
+  } else {
+    args.push('--geo-bypass');
+  }
+
+  const proxy = process.env.YT_DLP_PROXY;
+  if (proxy) {
+    args.push('--proxy', proxy);
+  }
+
   if (detectPlatform(url) === 'TikTok' && process.env.YT_DLP_IMPERSONATE !== '0') {
     args.push('--impersonate', process.env.YT_DLP_IMPERSONATE || 'chrome');
   }
@@ -951,6 +963,10 @@ export function cleanYtDlpError(stderr) {
 
   if (/YouTube.*Sign in to confirm|confirm you.?re not a bot|HTTP Error 403|PO Token|potoken/i.test(message)) {
     return 'YouTube blocked this request. Paste fresh YouTube cookies.txt first. If it still fails, add a matching YouTube PO token from the same browser session.';
+  }
+
+  if (/not made this video available in your country|video is not available.*your country|geo.?restrict/i.test(message)) {
+    return 'This video is geo-restricted and not available from the server\'s location. Set the YT_DLP_PROXY environment variable to a proxy in the allowed country (e.g. a Vietnamese proxy) to bypass this restriction.';
   }
 
   return message;
