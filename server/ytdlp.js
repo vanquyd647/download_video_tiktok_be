@@ -188,29 +188,14 @@ export async function resolveDirectDownload(url, root, options = {}) {
     return cached;
   }
 
-  const common = commonArgs(url, options);
-  let result;
-  try {
-    result = await runYtDlp(
-      [
-        ...common.args,
-        '--quiet',
-        '--no-progress',
-        '--format',
-        directQualityToFormat(quality),
-        '--skip-download',
-        '--dump-single-json',
-        url,
-      ],
-      {
-        root,
-        timeoutMs: 45_000,
-        maxOutputBytes: 20 * 1024 * 1024,
-      },
-    );
-  } finally {
-    common.cleanup();
-  }
+  const result = await runYtDlpWithFormatFallback({
+    url,
+    root,
+    options,
+    format: directQualityToFormat(quality),
+    fallbackFormat: directQualityFallbackFormat(),
+    timeoutMs: 45_000,
+  });
 
   let data;
   try {
@@ -272,21 +257,11 @@ export function streamDownload({ url, quality, cookiesBrowser, cookiesText, poTo
     throw error;
   }
 
-  const common = commonArgs(url, { cookiesBrowser, cookiesText, poToken });
-  const args = [
-    ...common.args,
-    '--quiet',
-    '--no-progress',
-    '--concurrent-fragments',
-    process.env.YT_DLP_CONCURRENT_FRAGMENTS || '8',
-    '--format',
-    streamQualityToFormat(quality),
-    '--output',
-    '-',
-    url,
-  ];
+  const format = streamQualityToFormat(quality);
+  const args = buildStreamDownloadArgs(url, { cookiesBrowser, cookiesText, poToken }, format);
+  const common = args.common;
 
-  const child = spawn(command.cmd, [...command.prefixArgs, ...args], {
+  const child = spawn(command.cmd, [...command.prefixArgs, ...args.args], {
     cwd: root,
     env: command.env,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -294,6 +269,25 @@ export function streamDownload({ url, quality, cookiesBrowser, cookiesText, poTo
   child.once('close', common.cleanup);
   child.once('error', common.cleanup);
   return child;
+}
+
+function buildStreamDownloadArgs(url, options, format) {
+  const common = commonArgs(url, options);
+  return {
+    common,
+    args: [
+      ...common.args,
+      '--quiet',
+      '--no-progress',
+      '--concurrent-fragments',
+      process.env.YT_DLP_CONCURRENT_FRAGMENTS || '8',
+      '--format',
+      format,
+      '--output',
+      '-',
+      url,
+    ],
+  };
 }
 
 export function startDownload({ url, quality, cookiesBrowser, cookiesText, poToken, root, downloadsDir, onUpdate }) {
@@ -511,30 +505,34 @@ function commonArgs(url, options = {}) {
 
 function qualityToFormat(quality) {
   if (quality === 'mp4') {
-    return 'bv*[ext=mp4]+ba[ext=m4a]/bv*[ext=mp4]+ba/b[ext=mp4]/bv*+ba/b/best';
+    return 'bv*[ext=mp4]+ba[ext=m4a]/bv*[ext=mp4]+ba/b[ext=mp4]/bv*+ba/best/b';
   }
 
   if (quality === 'clean') {
-    return 'bv*+ba/b/best';
+    return 'bv*+ba/best/b';
   }
 
-  return 'bv*+ba/b/best';
+  return 'bv*+ba/best/b';
 }
 
 function streamQualityToFormat(quality) {
   if (quality === 'mp4') {
-    return 'b[ext=mp4]/best[ext=mp4]/b/best';
+    return 'b[ext=mp4]/best[ext=mp4]/best/b';
   }
 
-  return 'b[ext=mp4]/b/best';
+  return 'b[ext=mp4]/best[ext=mp4]/best/b';
 }
 
 function directQualityToFormat(quality) {
   if (quality === 'best') {
-    return 'b[ext=mp4]/best[ext=mp4]/b/best';
+    return 'b[ext=mp4]/best[ext=mp4]/best/b';
   }
 
   return streamQualityToFormat(quality);
+}
+
+function directQualityFallbackFormat() {
+  return 'best/b';
 }
 
 function summarizeFormats(formats) {
@@ -757,6 +755,57 @@ function runYtDlp(args, { root, timeoutMs, maxOutputBytes }) {
       reject(error);
     });
   });
+}
+
+async function runYtDlpWithFormatFallback({ url, root, options, format, fallbackFormat, timeoutMs }) {
+  const common = commonArgs(url, options);
+  try {
+    return await runYtDlp(
+      [
+        ...common.args,
+        '--quiet',
+        '--no-progress',
+        '--format',
+        format,
+        '--skip-download',
+        '--dump-single-json',
+        url,
+      ],
+      {
+        root,
+        timeoutMs,
+        maxOutputBytes: 20 * 1024 * 1024,
+      },
+    );
+  } catch (error) {
+    if (!isRequestedFormatUnavailable(error) || !fallbackFormat || fallbackFormat === format) {
+      throw error;
+    }
+
+    return runYtDlp(
+      [
+        ...common.args,
+        '--quiet',
+        '--no-progress',
+        '--format',
+        fallbackFormat,
+        '--skip-download',
+        '--dump-single-json',
+        url,
+      ],
+      {
+        root,
+        timeoutMs,
+        maxOutputBytes: 20 * 1024 * 1024,
+      },
+    );
+  } finally {
+    common.cleanup();
+  }
+}
+
+function isRequestedFormatUnavailable(error) {
+  return /Requested format is not available|Use --list-formats/i.test(error?.message || '');
 }
 
 function buildCacheKey(kind, url, options = {}) {
