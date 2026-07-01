@@ -124,6 +124,29 @@ export function getCookiesSourceStatus() {
   };
 }
 
+export function getYoutubeProxyStatus() {
+  const proxy = resolveProxy();
+  if (!proxy) {
+    return {
+      configured: false,
+      mode: 'none',
+    };
+  }
+
+  if (proxy.placeholder) {
+    return {
+      configured: false,
+      mode: 'placeholder',
+      message: 'Replace the placeholder with a real proxy URL.',
+    };
+  }
+
+  return {
+    configured: true,
+    mode: 'configured',
+  };
+}
+
 export async function readMetadata(url, root, options = {}) {
   assertKnownHost(url);
   const cacheKey = buildCacheKey('metadata', url, options);
@@ -437,9 +460,9 @@ function commonArgs(url, options = {}) {
     args.push('--geo-bypass');
   }
 
-  const proxy = process.env.YT_DLP_PROXY;
-  if (proxy) {
-    args.push('--proxy', proxy);
+  const proxy = resolveProxy();
+  if (proxy && !proxy.placeholder) {
+    args.push('--proxy', proxy.value);
   }
 
   if (detectPlatform(url) === 'TikTok' && process.env.YT_DLP_IMPERSONATE !== '0') {
@@ -977,6 +1000,28 @@ function resolveCookiesSource() {
   }
 
   return null;
+}
+
+function resolveProxy() {
+  const value = process.env.YT_DLP_PROXY?.trim();
+  if (!value) return null;
+
+  return {
+    value,
+    placeholder: isPlaceholderProxy(value),
+  };
+}
+
+function isPlaceholderProxy(value) {
+  try {
+    const parsed = new URL(value);
+    return parsed.hostname === 'host'
+      || parsed.port === 'port'
+      || parsed.username === 'user'
+      || parsed.password === 'password';
+  } catch {
+    return true;
+  }
 }
 
 function looksLikePoTokenSpec(value) {

@@ -11,6 +11,7 @@ import {
   fetchDirectDownload,
   fetchResolvedDirectDownload,
   getCookiesSourceStatus,
+  getYoutubeProxyStatus,
   getYtDlpStatus,
   getYoutubePotProviderStatus,
   readMetadata,
@@ -55,9 +56,7 @@ app.get('/api/health', async (_req, res) => {
     ytDlp,
     youtubePotProvider: getYoutubePotProviderStatus(root),
     cookiesSource: getCookiesSourceStatus(),
-    youtubeProxy: {
-      configured: Boolean(process.env.YT_DLP_PROXY),
-    },
+    youtubeProxy: getYoutubeProxyStatus(),
     hostedRuntime: isHostedRuntime(),
     browserCookiesAvailable: !isHostedRuntime(),
     saveMode: 'browser',
