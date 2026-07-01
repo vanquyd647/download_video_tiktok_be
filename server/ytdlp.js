@@ -440,6 +440,31 @@ function commonArgs(url, options = {}) {
     args.push('--impersonate', process.env.YT_DLP_IMPERSONATE || 'chrome');
   }
 
+  if (detectPlatform(url) === 'YouTube') {
+    args.push(
+      '--retries',
+      process.env.YT_DLP_RETRIES || '3',
+      '--fragment-retries',
+      process.env.YT_DLP_FRAGMENT_RETRIES || '3',
+    );
+
+    if (process.env.YT_DLP_SLEEP_INTERVAL !== '0') {
+      args.push(
+        '--sleep-interval',
+        process.env.YT_DLP_SLEEP_INTERVAL || '5',
+        '--max-sleep-interval',
+        process.env.YT_DLP_MAX_SLEEP_INTERVAL || '10',
+      );
+    }
+
+    if (process.env.YT_DLP_SLEEP_REQUESTS !== '0') {
+      args.push(
+        '--sleep-requests',
+        process.env.YT_DLP_SLEEP_REQUESTS || '1',
+      );
+    }
+  }
+
   for (const extractorArgs of buildYoutubeExtractorArgs(url, options)) {
     args.push('--extractor-args', extractorArgs);
   }

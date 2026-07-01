@@ -16,6 +16,16 @@ services:
         value: chrome
       - key: YT_DLP_CONCURRENT_FRAGMENTS
         value: "8"
+      - key: YT_DLP_RETRIES
+        value: "3"
+      - key: YT_DLP_FRAGMENT_RETRIES
+        value: "3"
+      - key: YT_DLP_SLEEP_INTERVAL
+        value: "5"
+      - key: YT_DLP_MAX_SLEEP_INTERVAL
+        value: "10"
+      - key: YT_DLP_SLEEP_REQUESTS
+        value: "1"
       - key: YOUTUBE_PO_TOKEN
         sync: false
       - key: YOUTUBE_COOKIES_TEXT

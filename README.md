@@ -30,6 +30,11 @@ YT_DLP_COOKIES_FROM_BROWSER=chrome:Default
 YOUTUBE_PO_TOKEN=raw_or_mweb.gvs_token_from_the_same_browser_session
 YT_DLP_YOUTUBE_CLIENTS=default,web_safari,mweb
 YT_DLP_YOUTUBE_EXTRACTOR_ARGS=youtube:player-client=default,web_safari,mweb
+YT_DLP_RETRIES=3
+YT_DLP_FRAGMENT_RETRIES=3
+YT_DLP_SLEEP_INTERVAL=5
+YT_DLP_MAX_SLEEP_INTERVAL=10
+YT_DLP_SLEEP_REQUESTS=1
 DISABLE_BGUTIL_POT_PROVIDER=0
 BGUTIL_POT_PROVIDER_HOME=/absolute/path/to/bgutil-ytdlp-pot-provider/server
 YT_DLP_POT_PROVIDER_ARGS=youtubepot-bgutilscript:server_home=/absolute/path/to/server
@@ -51,6 +56,11 @@ use a different filename, set `YOUTUBE_COOKIES_FILE` or `YT_DLP_COOKIES` to the
 mounted path. If Secret Files are not convenient, set `YOUTUBE_COOKIES_TEXT` as
 an environment variable with the full cookies content. Do not commit cookies or
 tokens to GitHub.
+
+For YouTube requests, the backend defaults to `--retries 3`,
+`--fragment-retries 3`, `--sleep-interval 5`, `--max-sleep-interval 10`, and
+`--sleep-requests 1`. Set `YT_DLP_SLEEP_INTERVAL=0` and
+`YT_DLP_SLEEP_REQUESTS=0` if you need to disable the deliberate wait.
 
 For YouTube links blocked by datacenter traffic, the frontend can send a
 temporary Netscape `cookies.txt` export with the metadata/download request. The
