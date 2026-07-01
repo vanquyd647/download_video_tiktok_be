@@ -5,8 +5,7 @@ import { spawnSync } from 'node:child_process';
 
 const PYTHON_STANDALONE_URL =
   'https://github.com/astral-sh/python-build-standalone/releases/download/20260623/cpython-3.12.13%2B20260623-aarch64-apple-darwin-install_only_stripped.tar.gz';
-const YT_DLP_SOURCE_URL =
-  'yt-dlp[default,curl-cffi] @ https://github.com/yt-dlp/yt-dlp/archive/refs/tags/2026.06.09.zip';
+const YT_DLP_PACKAGE = 'yt-dlp[default,curl-cffi]';
 const POT_PROVIDER_PACKAGE = 'bgutil-ytdlp-pot-provider==1.3.1';
 const BGUTIL_PROVIDER_REPO = 'https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git';
 const BGUTIL_PROVIDER_VERSION = '1.3.1';
@@ -62,7 +61,7 @@ function installPortablePythonYtDlp() {
     '--upgrade',
     '--target',
     ytDlpPy312Dir,
-    YT_DLP_SOURCE_URL,
+    YT_DLP_PACKAGE,
     POT_PROVIDER_PACKAGE,
   ], 'Failed to install yt-dlp with portable Python 3.12.');
 
@@ -103,7 +102,7 @@ function installSystemPythonYtDlp() {
     '--upgrade',
     '--target',
     vendorDir,
-    'yt-dlp[default,curl-cffi]',
+    YT_DLP_PACKAGE,
     POT_PROVIDER_PACKAGE,
   ], 'Failed to install yt-dlp. Check Python/pip and network access, then retry.');
 

@@ -16,6 +16,12 @@ services:
         value: chrome
       - key: YT_DLP_CONCURRENT_FRAGMENTS
         value: "8"
+      - key: YOUTUBE_PO_TOKEN
+        sync: false
+      - key: YOUTUBE_COOKIES_TEXT
+        sync: false
+      - key: YOUTUBE_COOKIES_FILE
+        value: /etc/secrets/youtube_cookies.txt
       - key: SMTP_HOST
         value: smtp.gmail.com
       - key: SMTP_PORT

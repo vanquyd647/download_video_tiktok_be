@@ -20,6 +20,7 @@ const statusCacheTtlMs = 5 * 60 * 1000;
 const failedStatusCacheTtlMs = 10 * 1000;
 const metadataCacheTtlMs = 10 * 60 * 1000;
 const directDownloadCacheTtlMs = 10 * 60 * 1000;
+const defaultRenderCookiesPath = '/etc/secrets/youtube_cookies.txt';
 
 export function detectPlatform(url) {
   try {
@@ -105,6 +106,21 @@ export function getYoutubePotProviderStatus(root) {
   return {
     available: existsSync(serverHome),
     mode: 'bgutil-script',
+  };
+}
+
+export function getCookiesSourceStatus() {
+  const source = resolveCookiesSource();
+  if (!source) {
+    return {
+      available: false,
+      mode: 'none',
+    };
+  }
+
+  return {
+    available: true,
+    mode: source.mode,
   };
 }
 
@@ -432,11 +448,18 @@ function commonArgs(url, options = {}) {
     const tempCookies = writeTempCookies(options.cookiesText);
     args.push('--cookies', tempCookies.path);
     cleanup = tempCookies.cleanup;
-  } else if (process.env.YT_DLP_COOKIES) {
-    args.push('--cookies', process.env.YT_DLP_COOKIES);
   } else {
+    const cookieSource = resolveCookiesSource();
+    if (cookieSource?.mode === 'env-text') {
+      const tempCookies = writeTempCookies(cookieSource.value);
+      args.push('--cookies', tempCookies.path);
+      cleanup = tempCookies.cleanup;
+    } else if (cookieSource?.mode === 'file') {
+      args.push('--cookies', cookieSource.value);
+    }
+
     const cookiesBrowser = options.cookiesBrowser || process.env.YT_DLP_COOKIES_FROM_BROWSER;
-    if (cookiesBrowser) {
+    if (!cookieSource && cookiesBrowser) {
       args.push('--cookies-from-browser', cookiesBrowser);
     }
   }
@@ -776,8 +799,9 @@ function buildYoutubeExtractorArgs(url, options = {}) {
   );
   const parts = [`player-client=${clients}`];
 
-  if (options.poToken) {
-    parts.push(`po_token=${buildPoTokenArg(clients, options.poToken)}`);
+  const poToken = options.poToken || process.env.YOUTUBE_PO_TOKEN;
+  if (poToken) {
+    parts.push(`po_token=${buildPoTokenArg(clients, poToken)}`);
   }
 
   return [
@@ -836,6 +860,28 @@ function buildPoTokenArg(clients, token) {
     .filter((client) => client && client !== 'default')
     .flatMap((client) => contexts.map((context) => `${client}.${context}+${cleanedToken}`))
     .join(',');
+}
+
+function resolveCookiesSource() {
+  const envText = process.env.YOUTUBE_COOKIES_TEXT || process.env.YT_DLP_COOKIES_TEXT;
+  if (envText?.trim()) {
+    return {
+      mode: 'env-text',
+      value: envText,
+    };
+  }
+
+  const filePath = process.env.YT_DLP_COOKIES
+    || process.env.YOUTUBE_COOKIES_FILE
+    || defaultRenderCookiesPath;
+  if (filePath && existsSync(filePath)) {
+    return {
+      mode: 'file',
+      value: filePath,
+    };
+  }
+
+  return null;
 }
 
 function looksLikePoTokenSpec(value) {
