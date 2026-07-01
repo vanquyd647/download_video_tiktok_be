@@ -480,7 +480,9 @@ function commonArgs(url, options = {}) {
       args.push('--cookies', tempCookies.path);
       cleanup = tempCookies.cleanup;
     } else if (cookieSource?.mode === 'file') {
-      args.push('--cookies', cookieSource.value);
+      const tempCookies = copyTempCookiesFile(cookieSource.value);
+      args.push('--cookies', tempCookies.path);
+      cleanup = tempCookies.cleanup;
     }
 
     const cookiesBrowser = options.cookiesBrowser || process.env.YT_DLP_COOKIES_FROM_BROWSER;
@@ -793,6 +795,10 @@ function writeTempCookies(cookiesText) {
     path,
     cleanup: once(() => rmSync(dir, { recursive: true, force: true })),
   };
+}
+
+function copyTempCookiesFile(sourcePath) {
+  return writeTempCookies(readFileSync(sourcePath, 'utf8'));
 }
 
 function normalizeCookiesText(value) {
