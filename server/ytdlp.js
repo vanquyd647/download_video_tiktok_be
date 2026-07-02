@@ -201,11 +201,13 @@ export async function readMetadata(url, root, options = {}) {
 export async function resolveDirectDownload(url, root, options = {}) {
   assertKnownHost(url);
   const quality = options.quality || 'best';
+  const resolution = normalizeResolution(options.resolution);
   const cacheKey = buildCacheKey('direct', url, {
     cookiesBrowser: options.cookiesBrowser,
     cookiesText: options.cookiesText,
     poToken: options.poToken,
     quality,
+    resolution,
   });
   const cached = readCache(directDownloadCache, cacheKey, directDownloadCacheTtlMs);
   if (cached) {
@@ -216,7 +218,7 @@ export async function resolveDirectDownload(url, root, options = {}) {
     url,
     root,
     options,
-    format: directQualityToFormat(quality),
+    format: directQualityToFormat(quality, resolution),
     fallbackFormat: directQualityFallbackFormat(),
     timeoutMs: 45_000,
   });
@@ -248,8 +250,8 @@ export async function resolveDirectDownload(url, root, options = {}) {
   return payload;
 }
 
-export async function fetchDirectDownload({ url, quality, cookiesBrowser, cookiesText, poToken, root, signal }) {
-  const direct = await resolveDirectDownload(url, root, { quality, cookiesBrowser, cookiesText, poToken });
+export async function fetchDirectDownload({ url, quality, resolution, cookiesBrowser, cookiesText, poToken, root, signal }) {
+  const direct = await resolveDirectDownload(url, root, { quality, resolution, cookiesBrowser, cookiesText, poToken });
   return fetchResolvedDirectDownload({ direct, signal });
 }
 
@@ -271,7 +273,7 @@ export async function fetchResolvedDirectDownload({ direct, signal }) {
   return response;
 }
 
-export function streamDownload({ url, quality, cookiesBrowser, cookiesText, poToken, root }) {
+export function streamDownload({ url, quality, resolution, cookiesBrowser, cookiesText, poToken, root }) {
   assertKnownHost(url);
 
   const command = resolveYtDlp(root);
@@ -281,7 +283,7 @@ export function streamDownload({ url, quality, cookiesBrowser, cookiesText, poTo
     throw error;
   }
 
-  const format = streamQualityToFormat(quality);
+  const format = streamQualityToFormat(quality, resolution);
   const args = buildStreamDownloadArgs(url, { cookiesBrowser, cookiesText, poToken }, format);
   const common = args.common;
 
@@ -304,7 +306,7 @@ function buildStreamDownloadArgs(url, options, format) {
       '--quiet',
       '--no-progress',
       '--concurrent-fragments',
-      process.env.YT_DLP_CONCURRENT_FRAGMENTS || '8',
+      process.env.YT_DLP_CONCURRENT_FRAGMENTS || '16',
       '--merge-output-format',
       'mp4',
       '--format',
@@ -555,24 +557,76 @@ function qualityToFormat(quality) {
   return 'bv*+ba/best/b';
 }
 
-function streamQualityToFormat(quality) {
+function streamQualityToFormat(quality, resolution) {
+  const cap = resolutionCapSelector(resolution);
   if (quality === 'mp4') {
-    return 'bv*[ext=mp4]+ba[ext=m4a]/bv*[ext=mp4]+ba/b[ext=mp4]/best[ext=mp4]/bv*+ba/best/b';
+    return [
+      `bv*[ext=mp4]${cap}+ba[ext=m4a]`,
+      `bv*[ext=mp4]${cap}+ba`,
+      `b[ext=mp4]${cap}`,
+      `best[ext=mp4]${cap}`,
+      'bv*[ext=mp4]+ba[ext=m4a]',
+      'bv*[ext=mp4]+ba',
+      'b[ext=mp4]',
+      'best[ext=mp4]',
+      'bv*+ba',
+      'best',
+      'b',
+    ].join('/');
   }
 
-  return 'bv*+ba/best/b';
+  return [
+    `bv*${cap}+ba`,
+    `best${cap}`,
+    'bv*+ba',
+    'best',
+    'b',
+  ].join('/');
 }
 
-function directQualityToFormat(quality) {
+function directQualityToFormat(quality, resolution) {
+  const cap = resolutionCapSelector(resolution);
   if (quality === 'best' || quality === 'clean') {
-    return 'bv*+ba/best/b';
+    return [
+      `bv*${cap}+ba`,
+      `best${cap}`,
+      'bv*+ba',
+      'best',
+      'b',
+    ].join('/');
   }
 
-  return 'bv*[ext=mp4]+ba[ext=m4a]/bv*[ext=mp4]+ba/b[ext=mp4]/best[ext=mp4]/best/b';
+  return [
+    `bv*[ext=mp4]${cap}+ba[ext=m4a]`,
+    `bv*[ext=mp4]${cap}+ba`,
+    `b[ext=mp4]${cap}`,
+    `best[ext=mp4]${cap}`,
+    'bv*[ext=mp4]+ba[ext=m4a]',
+    'bv*[ext=mp4]+ba',
+    'b[ext=mp4]',
+    'best[ext=mp4]',
+    'best',
+    'b',
+  ].join('/');
 }
 
 function directQualityFallbackFormat() {
   return 'best/b';
+}
+
+function normalizeResolution(value) {
+  const normalized = String(value || '1080').trim().toLowerCase();
+  if (['auto', '2160', '1440', '1080', '720', '480', '360'].includes(normalized)) {
+    return normalized;
+  }
+
+  return '1080';
+}
+
+function resolutionCapSelector(resolution) {
+  const normalized = normalizeResolution(resolution);
+  if (normalized === 'auto') return '';
+  return `[height<=${normalized}]`;
 }
 
 function summarizeFormats(formats) {
@@ -866,6 +920,7 @@ function buildCacheKey(kind, url, options = {}) {
     kind,
     url,
     quality: options.quality || '',
+    resolution: options.resolution || '',
     cookiesBrowser: options.cookiesBrowser || '',
     cookiesTextHash: options.cookiesText ? hashText(options.cookiesText) : '',
     poTokenHash: options.poToken ? hashText(options.poToken) : '',

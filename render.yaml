@@ -15,7 +15,7 @@ services:
       - key: YT_DLP_IMPERSONATE
         value: chrome
       - key: YT_DLP_CONCURRENT_FRAGMENTS
-        value: "8"
+        value: "16"
       - key: YT_DLP_RETRIES
         value: "3"
       - key: YT_DLP_FRAGMENT_RETRIES

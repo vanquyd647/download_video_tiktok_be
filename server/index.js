@@ -113,14 +113,16 @@ app.post('/api/metadata', async (req, res) => {
 app.post('/api/download-url', async (req, res) => {
   let url;
   let quality;
+  let resolution;
   let cookieOptions;
   let fileName;
   try {
     url = assertSupportedUrl(req.body?.url);
     quality = normalizeQuality(req.body?.quality);
+    resolution = normalizeResolution(req.body?.resolution);
     cookieOptions = normalizeCookieOptions(req.body);
     fileName = buildDownloadFileName(url, req.body?.title);
-    const direct = await resolveDirectDownload(url, root, { quality, ...cookieOptions });
+    const direct = await resolveDirectDownload(url, root, { quality, resolution, ...cookieOptions });
 
     if (hasPrivateDownloadOptions(cookieOptions)) {
       const token = createDownloadSession({
@@ -143,6 +145,7 @@ app.post('/api/download-url', async (req, res) => {
       url: buildApiUrl(req, '/api/download-direct', {
         url,
         quality,
+        resolution,
         cookiesBrowser: req.body?.cookiesBrowser || 'none',
         cookiesProfile: req.body?.cookiesProfile || '',
         title: req.body?.title || 'video',
@@ -155,6 +158,7 @@ app.post('/api/download-url', async (req, res) => {
         type: 'stream',
         url,
         quality,
+        resolution,
         cookieOptions,
         fileName,
       });
@@ -201,11 +205,13 @@ app.get('/api/download-direct', async (req, res) => {
 
     const url = assertSupportedUrl(req.query?.url);
     const quality = normalizeQuality(req.query?.quality);
+    const resolution = normalizeResolution(req.query?.resolution);
     const cookiesBrowser = normalizeCookiesBrowser(req.query?.cookiesBrowser, req.query?.cookiesProfile);
     const fileName = buildDownloadFileName(url, req.query?.title);
     const upstream = await fetchDirectDownload({
       url,
       quality,
+      resolution,
       cookiesBrowser,
       root,
       signal: req.signal,
@@ -233,6 +239,7 @@ function streamYtDlpDownload(req, res) {
     const tokenSession = readDownloadSession(req.query?.token, 'stream');
     const url = tokenSession?.url || assertSupportedUrl(req.query?.url);
     const quality = tokenSession?.quality || normalizeQuality(req.query?.quality);
+    const resolution = tokenSession?.resolution || normalizeResolution(req.query?.resolution);
     const cookieOptions = tokenSession?.cookieOptions || {
       cookiesBrowser: normalizeCookiesBrowser(req.query?.cookiesBrowser, req.query?.cookiesProfile),
     };
@@ -240,6 +247,7 @@ function streamYtDlpDownload(req, res) {
     const child = streamDownload({
       url,
       quality,
+      resolution,
       ...cookieOptions,
       root,
     });
@@ -327,6 +335,15 @@ function normalizeQuality(value) {
   }
 
   return 'best';
+}
+
+function normalizeResolution(value) {
+  const normalized = String(value || '1080').trim().toLowerCase();
+  if (['auto', '2160', '1440', '1080', '720', '480', '360'].includes(normalized)) {
+    return normalized;
+  }
+
+  return '1080';
 }
 
 function normalizeCookiesBrowser(value, profileValue) {
