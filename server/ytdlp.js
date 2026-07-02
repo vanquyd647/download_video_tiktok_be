@@ -297,6 +297,111 @@ export function streamDownload({ url, quality, resolution, cookiesBrowser, cooki
   return child;
 }
 
+export function downloadToTempFile({ url, quality, resolution, cookiesBrowser, cookiesText, poToken, root }) {
+  assertKnownHost(url);
+
+  const command = resolveYtDlp(root);
+  if (!command) {
+    const error = new Error('yt-dlp is not installed. Run npm run setup:yt-dlp.');
+    error.status = 503;
+    throw error;
+  }
+
+  const tempDir = mkdtempSync(join(tmpdir(), 'linkvault-download-'));
+  const cleanupTempDir = once(() => rmSync(tempDir, { recursive: true, force: true }));
+  const format = streamQualityToFormat(quality, resolution);
+  const common = commonArgs(url, { cookiesBrowser, cookiesText, poToken });
+  const cleanup = once(() => {
+    common.cleanup();
+    cleanupTempDir();
+  });
+  const args = [
+    ...common.args,
+    '--quiet',
+    '--no-progress',
+    '--concurrent-fragments',
+    process.env.YT_DLP_CONCURRENT_FRAGMENTS || '16',
+    '--merge-output-format',
+    'mp4',
+    '--format',
+    format,
+    '--paths',
+    tempDir,
+    '--output',
+    '%(extractor)s-%(id)s-%(title).80s.%(ext)s',
+    '--print',
+    'after_move:filepath',
+    url,
+  ];
+
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(command.cmd, [...command.prefixArgs, ...args], {
+      cwd: root,
+      env: command.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let settled = false;
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+      if (stdout.length > 16_000) {
+        stdout = stdout.slice(-16_000);
+      }
+    });
+
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+      if (stderr.length > 16_000) {
+        stderr = stderr.slice(-16_000);
+      }
+    });
+
+    child.on('error', (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    });
+
+    child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      common.cleanup();
+      if (code !== 0) {
+        cleanupTempDir();
+        const error = new Error(cleanYtDlpError(stderr) || `yt-dlp exited with code ${code}.`);
+        error.status = 422;
+        error.handled = true;
+        reject(error);
+        return;
+      }
+
+      const filePath = stdout
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .reverse()
+        .find((line) => line && !line.startsWith('['));
+
+      if (!filePath || !existsSync(filePath)) {
+        cleanupTempDir();
+        const error = new Error('yt-dlp finished but did not produce a downloadable file.');
+        error.status = 502;
+        error.handled = true;
+        reject(error);
+        return;
+      }
+
+      resolvePromise({
+        filePath,
+        cleanup: cleanupTempDir,
+      });
+    });
+  });
+}
+
 function buildStreamDownloadArgs(url, options, format) {
   const common = commonArgs(url, options);
   return {

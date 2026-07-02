@@ -6,8 +6,8 @@ import { homedir } from 'node:os';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import {
-  cleanYtDlpError,
   detectPlatform,
+  downloadToTempFile,
   fetchDirectDownload,
   fetchResolvedDirectDownload,
   getCookiesSourceStatus,
@@ -16,7 +16,6 @@ import {
   getYoutubePotProviderStatus,
   readMetadata,
   resolveDirectDownload,
-  streamDownload,
 } from './ytdlp.js';
 import {
   sendFeedbackMail,
@@ -234,7 +233,8 @@ app.get('/api/download-direct', async (req, res) => {
   }
 });
 
-function streamYtDlpDownload(req, res) {
+async function streamYtDlpDownload(req, res) {
+  let tempDownload;
   try {
     const tokenSession = readDownloadSession(req.query?.token, 'stream');
     const url = tokenSession?.url || assertSupportedUrl(req.query?.url);
@@ -244,7 +244,7 @@ function streamYtDlpDownload(req, res) {
       cookiesBrowser: normalizeCookiesBrowser(req.query?.cookiesBrowser, req.query?.cookiesProfile),
     };
     const fileName = tokenSession?.fileName || buildDownloadFileName(url, req.query?.title);
-    const child = streamDownload({
+    tempDownload = await downloadToTempFile({
       url,
       quality,
       resolution,
@@ -252,44 +252,15 @@ function streamYtDlpDownload(req, res) {
       root,
     });
 
-    let started = false;
-    let stderr = '';
-
-    child.stdout.once('data', (chunk) => {
-      started = true;
-      res.status(200);
-      res.setHeader('Content-Type', 'video/mp4');
-      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-      res.write(chunk);
-      child.stdout.pipe(res);
-    });
-
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
-      if (stderr.length > 8000) {
-        stderr = stderr.slice(-8000);
+    res.download(tempDownload.filePath, fileName, (error) => {
+      tempDownload.cleanup();
+      tempDownload = null;
+      if (error && !res.headersSent) {
+        res.status(500).json({ message: error.message || 'Could not send download.' });
       }
-    });
-
-    child.on('error', (error) => {
-      if (!started && !res.headersSent) {
-        res.status(500).json({ message: error.message || 'Could not start download.' });
-      } else {
-        res.destroy(error);
-      }
-    });
-
-    child.on('close', (code) => {
-      if (started) {
-        if (!res.writableEnded) res.end();
-        return;
-      }
-
-      res.status(code === 0 ? 204 : 422).json({
-        message: cleanYtDlpError(stderr) || `yt-dlp exited with code ${code}.`,
-      });
     });
   } catch (error) {
+    tempDownload?.cleanup();
     res.status(error.status || 500).json({
       message: error.message || 'Could not start download.',
     });
