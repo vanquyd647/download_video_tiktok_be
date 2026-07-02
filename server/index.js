@@ -305,7 +305,7 @@ function normalizeQuality(value) {
     return value;
   }
 
-  return 'best';
+  return 'mp4';
 }
 
 function normalizeResolution(value) {

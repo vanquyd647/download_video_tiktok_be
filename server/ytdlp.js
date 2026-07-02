@@ -200,7 +200,7 @@ export async function readMetadata(url, root, options = {}) {
 
 export async function resolveDirectDownload(url, root, options = {}) {
   assertKnownHost(url);
-  const quality = options.quality || 'best';
+  const quality = options.quality || 'mp4';
   const resolution = normalizeResolution(options.resolution);
   const cacheKey = buildCacheKey('direct', url, {
     cookiesBrowser: options.cookiesBrowser,
@@ -652,7 +652,7 @@ function commonArgs(url, options = {}) {
 
 function qualityToFormat(quality) {
   if (quality === 'mp4') {
-    return 'bv*[ext=mp4]+ba[ext=m4a]/bv*[ext=mp4]+ba/b[ext=mp4]/bv*+ba/best/b';
+    return compatibleMp4Format('');
   }
 
   if (quality === 'clean') {
@@ -665,19 +665,7 @@ function qualityToFormat(quality) {
 function streamQualityToFormat(quality, resolution) {
   const cap = resolutionCapSelector(resolution);
   if (quality === 'mp4') {
-    return [
-      `bv*[ext=mp4]${cap}+ba[ext=m4a]`,
-      `bv*[ext=mp4]${cap}+ba`,
-      `b[ext=mp4]${cap}`,
-      `best[ext=mp4]${cap}`,
-      'bv*[ext=mp4]+ba[ext=m4a]',
-      'bv*[ext=mp4]+ba',
-      'b[ext=mp4]',
-      'best[ext=mp4]',
-      'bv*+ba',
-      'best',
-      'b',
-    ].join('/');
+    return compatibleMp4Format(cap);
   }
 
   return [
@@ -701,18 +689,7 @@ function directQualityToFormat(quality, resolution) {
     ].join('/');
   }
 
-  return [
-    `bv*[ext=mp4]${cap}+ba[ext=m4a]`,
-    `bv*[ext=mp4]${cap}+ba`,
-    `b[ext=mp4]${cap}`,
-    `best[ext=mp4]${cap}`,
-    'bv*[ext=mp4]+ba[ext=m4a]',
-    'bv*[ext=mp4]+ba',
-    'b[ext=mp4]',
-    'best[ext=mp4]',
-    'best',
-    'b',
-  ].join('/');
+  return compatibleMp4Format(cap);
 }
 
 function directQualityFallbackFormat() {
@@ -732,6 +709,26 @@ function resolutionCapSelector(resolution) {
   const normalized = normalizeResolution(resolution);
   if (normalized === 'auto') return '';
   return `[height<=${normalized}]`;
+}
+
+function compatibleMp4Format(cap) {
+  return [
+    `bv*[ext=mp4][vcodec^=avc1]${cap}+ba[ext=m4a]`,
+    `bv*[ext=mp4][vcodec^=avc1]${cap}+ba`,
+    `b[ext=mp4][vcodec^=avc1]${cap}`,
+    `best[ext=mp4][vcodec^=avc1]${cap}`,
+    'bv*[ext=mp4][vcodec^=avc1]+ba[ext=m4a]',
+    'bv*[ext=mp4][vcodec^=avc1]+ba',
+    'b[ext=mp4][vcodec^=avc1]',
+    'best[ext=mp4][vcodec^=avc1]',
+    `bv*[ext=mp4]${cap}+ba[ext=m4a]`,
+    `b[ext=mp4]${cap}`,
+    'bv*[ext=mp4]+ba[ext=m4a]',
+    'b[ext=mp4]',
+    'best[ext=mp4]',
+    'best',
+    'b',
+  ].join('/');
 }
 
 function summarizeFormats(formats) {
