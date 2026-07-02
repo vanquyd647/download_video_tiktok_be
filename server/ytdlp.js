@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
+import ffmpegPath from 'ffmpeg-static';
 
 const supportedHosts = [
   /(^|\.)tiktok\.com$/i,
@@ -304,6 +305,8 @@ function buildStreamDownloadArgs(url, options, format) {
       '--no-progress',
       '--concurrent-fragments',
       process.env.YT_DLP_CONCURRENT_FRAGMENTS || '8',
+      '--merge-output-format',
+      'mp4',
       '--format',
       format,
       '--output',
@@ -465,6 +468,10 @@ function commonArgs(url, options = {}) {
     args.push('--proxy', proxy.value);
   }
 
+  if (ffmpegPath && existsSync(ffmpegPath)) {
+    args.push('--ffmpeg-location', ffmpegPath);
+  }
+
   if (detectPlatform(url) === 'TikTok' && process.env.YT_DLP_IMPERSONATE !== '0') {
     args.push('--impersonate', process.env.YT_DLP_IMPERSONATE || 'chrome');
   }
@@ -550,18 +557,18 @@ function qualityToFormat(quality) {
 
 function streamQualityToFormat(quality) {
   if (quality === 'mp4') {
-    return 'b[ext=mp4]/best[ext=mp4]/best/b';
+    return 'bv*[ext=mp4]+ba[ext=m4a]/bv*[ext=mp4]+ba/b[ext=mp4]/best[ext=mp4]/bv*+ba/best/b';
   }
 
-  return 'b[ext=mp4]/best[ext=mp4]/best/b';
+  return 'bv*+ba/best/b';
 }
 
 function directQualityToFormat(quality) {
-  if (quality === 'best') {
-    return 'b[ext=mp4]/best[ext=mp4]/best/b';
+  if (quality === 'best' || quality === 'clean') {
+    return 'bv*+ba/best/b';
   }
 
-  return streamQualityToFormat(quality);
+  return 'bv*[ext=mp4]+ba[ext=m4a]/bv*[ext=mp4]+ba/b[ext=mp4]/best[ext=mp4]/best/b';
 }
 
 function directQualityFallbackFormat() {
@@ -572,6 +579,14 @@ function summarizeFormats(formats) {
   const seen = new Set();
   return formats
     .filter((format) => format.vcodec !== 'none' || format.acodec !== 'none')
+    .sort((a, b) => {
+      const aVideo = a.vcodec && a.vcodec !== 'none' ? 1 : 0;
+      const bVideo = b.vcodec && b.vcodec !== 'none' ? 1 : 0;
+      return bVideo - aVideo
+        || (b.height || 0) - (a.height || 0)
+        || (b.fps || 0) - (a.fps || 0)
+        || (b.filesize || b.filesize_approx || 0) - (a.filesize || a.filesize_approx || 0);
+    })
     .map((format) => ({
       id: format.format_id,
       ext: format.ext,
@@ -592,8 +607,13 @@ function summarizeFormats(formats) {
 }
 
 function extractDirectDownload(data) {
+  const requestedDownloads = Array.isArray(data.requested_downloads) ? data.requested_downloads : [];
+  if (requestedDownloads.length > 1) {
+    return null;
+  }
+
   const candidates = [
-    ...(Array.isArray(data.requested_downloads) ? data.requested_downloads : []),
+    ...requestedDownloads,
     data,
   ];
   const direct = candidates.find((item) => item?.url && /^https?:\/\//i.test(item.url));
